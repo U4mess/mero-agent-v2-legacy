@@ -4,6 +4,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("io.objectbox")
 }
 
 android {
@@ -48,4 +49,6 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
+    implementation("io.objectbox:objectbox-android:5.4.2")
+    implementation("io.objectbox:objectbox-kotlin:5.4.2")
 }
