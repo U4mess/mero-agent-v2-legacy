@@ -1,8 +1,17 @@
-﻿# Mero Agent
+# Mero Agent
 
 [![Build Mero Agent APK](https://github.com/U4mess/Mero-Agent/actions/workflows/build-apk.yml/badge.svg)](https://github.com/U4mess/Mero-Agent/actions/workflows/build-apk.yml)
 
 **Mero Agent** is a local-first, privacy-focused Android AI assistant powered by `llama.cpp` (GGUF) and on-device ObjectBox RAG.
+
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/chat.png" width="210" alt="Chat UI" />
+  <img src="screenshots/memory.png" width="210" alt="ObjectBox Memory" />
+  <img src="screenshots/settings.png" width="210" alt="Settings & Backup" />
+  <img src="screenshots/island.png" width="210" alt="Dynamic Island" />
+</p>
 
 ---
 
