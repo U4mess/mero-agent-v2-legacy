@@ -74,7 +74,14 @@ object LiteRtLmEngine {
             )
             val active = currentEngine.createConversation(config)
             conversation = active
-            active to currentText
+            val prompt = if (system.contains("OCR transcripts and notes")) {
+                "Use the OCR memory context from the system instructions. Quote the relevant " +
+                    "OCR line directly; do not ask me to provide the screenshot or context.\n\n" +
+                    currentText
+            } else {
+                currentText
+            }
+            active to prompt
         }
         val activeConversation = pair.first
         val prompt = pair.second

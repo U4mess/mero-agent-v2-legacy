@@ -5,12 +5,18 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.content.SharedPreferences
+import android.util.Log
+import com.u4mess.ume.UmeApplication
 import java.io.Closeable
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ModelRole { CHAT, EMBEDDING }
@@ -31,6 +37,8 @@ object ModelManager {
 
     private lateinit var appContext: Context
     private lateinit var prefs: SharedPreferences
+    private val backfillScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val backfilling = AtomicBoolean(false)
 
     val chatSelection = MutableStateFlow<Selection?>(null)
     val embeddingSelection = MutableStateFlow<Selection?>(null)
@@ -139,6 +147,35 @@ object ModelManager {
         LocalLlmEngine.stopGeneration()
     }
 
+    private fun backfillMissingEmbeddings() {
+        if (!backfilling.compareAndSet(false, true)) return
+        backfillScope.launch {
+            try {
+                val repository = (appContext as? UmeApplication)?.memoryRepository ?: return@launch
+                val missing = repository.all().filter {
+                    it.embedding == null || it.embedding?.size != 384
+                }
+                var generated = 0
+                for (memory in missing) {
+                    if (LocalLlmEngine.embeddingStatus.value !is ModelStatus.Ready) break
+                    val text = buildString {
+                        if (memory.title.isNotBlank()) append(memory.title).append('\n')
+                        append(memory.content)
+                    }.take(4000)
+                    val vector = LocalLlmEngine.embed(text) ?: continue
+                    repository.updateEmbedding(memory.id, vector)
+                    generated++
+                }
+                Log.i(
+                    "MeroRag",
+                    "Embedding backfill complete: generated=$generated missing=${missing.size}",
+                )
+            } finally {
+                backfilling.set(false)
+            }
+        }
+    }
+
     private fun materializeLiteRtlm(selection: Selection): String? {
         val uri = Uri.parse(selection.uri)
         if (uri.scheme.isNullOrBlank()) {
@@ -174,7 +211,10 @@ object ModelManager {
             write(EMBEDDING, updated)
         }
         val loaded = LocalLlmEngine.loadEmbedding(path)
-        if (loaded) setAutoLoad(true)
+        if (loaded) {
+            setAutoLoad(true)
+            backfillMissingEmbeddings()
+        }
         loaded
     }
 

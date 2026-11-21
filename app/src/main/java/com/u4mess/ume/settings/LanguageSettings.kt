@@ -2,6 +2,7 @@ package com.u4mess.ume.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 
 enum class LanguageMode(val label: String) {
@@ -25,6 +26,7 @@ object LanguageSettings {
         mode.value = prefs.getString(KEY_MODE, null)
             ?.let { saved -> LanguageMode.entries.firstOrNull { it.name == saved } }
             ?: LanguageMode.AUTO
+        Log.i("MeroLanguage", "Language mode loaded: ${mode.value.name}")
     }
 
     fun setMode(value: LanguageMode) {
@@ -40,10 +42,21 @@ object LanguageSettings {
         -> "ne-NP"
     }
 
-    fun promptDirective(): String = when (mode.value) {
-        LanguageMode.AUTO ->
-            "Reply in the same language and script the user uses (English, Devanagari Nepali, " +
-                "or Romanized Nepali). When replying in Nepali, use natural, conversational Nepali."
+    fun promptDirective(latestUserText: String? = null): String = when (mode.value) {
+        LanguageMode.AUTO -> when {
+            latestUserText.isNullOrBlank() ->
+                "Match the language and script of the latest user message only, " +
+                    "regardless of earlier turns."
+            DEVANAGARI.containsMatchIn(latestUserText) ->
+                "The latest user message is in Devanagari Nepali. Reply in fluent, natural " +
+                    "Devanagari Nepali regardless of the language of earlier turns."
+            ROMANIZED_NEPALI.containsMatchIn(latestUserText) ->
+                "The latest user message is Romanized Nepali. Reply in natural, conversational " +
+                    "Romanized Nepali regardless of the language of earlier turns."
+            else ->
+                "The latest user message is English. Reply in clear, concise English " +
+                    "regardless of the language of earlier turns."
+        }
         LanguageMode.ENGLISH ->
             "Reply in clear, concise English."
         LanguageMode.NEPALI_DEVANAGARI ->
@@ -51,4 +64,11 @@ object LanguageSettings {
         LanguageMode.NEPALI_ROMANIZED ->
             "Always reply in natural, conversational Romanized Nepali (Nepali written in Latin letters)."
     }
+
+    private val DEVANAGARI = Regex("[\\u0900-\\u097F]")
+    private val ROMANIZED_NEPALI = Regex(
+        "\\b(mero|malai|tapai|timi|chha|cha|huncha|garna|kina|kasto|ramro|" +
+            "dhanyabad|hola|pani|kasari|kaha|k\\s*ho)\\b",
+        RegexOption.IGNORE_CASE,
+    )
 }

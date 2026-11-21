@@ -1,6 +1,7 @@
 package com.u4mess.ume.brain
 
 import android.content.Context
+import android.util.Log
 import com.u4mess.ume.memory.MemoryEntity
 import com.u4mess.ume.memory.MemoryRepository
 import com.u4mess.ume.memory.MemorySource
@@ -14,6 +15,9 @@ import com.u4mess.ume.settings.LanguageSettings
 import com.u4mess.ume.settings.WebSearchSettings
 import com.u4mess.ume.voice.VoiceChatSession
 import com.u4mess.ume.voice.VoiceOutputManager
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -74,6 +78,7 @@ object ChatController {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val pending = Channel<IncomingPrompt>(Channel.UNLIMITED)
+    private val MEMORY_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
     private var nextId = 0L
     private var islandConsumed = 0
     private var started = false
@@ -487,14 +492,30 @@ object ChatController {
                 append("You are Mero Agent, a helpful AI assistant with access to the user's memories.")
             }
             append(" ")
-            append(LanguageSettings.promptDirective())
+            append(LanguageSettings.promptDirective(query))
             append(" Answer directly and concisely.")
             if (memories.isNotEmpty()) {
-                append("\n\nRelevant memories from this device:\n")
+                Log.i(
+                    "MeroRag",
+                    "Injecting ${memories.size} memory snippets into prompt; sources=" +
+                        memories.joinToString(",") { it.source },
+                )
+                append(
+                    "\n\nThe following are OCR transcripts and notes from the user's device memory. " +
+                        "Use them directly to answer questions about screenshots, notifications, " +
+                        "or saved notes. The OCR transcripts are already included below; do not " +
+                        "ask the user to provide the screenshot or more context. When the user " +
+                        "asks about a screenshot, quote at least one relevant OCR line explicitly " +
+                        "in your answer.\n",
+                )
                 memories.forEach { memory ->
-                    append("- ")
+                    append("- [")
+                    append(memory.source.ifBlank { "memory" })
+                    append(" | ")
+                    append(formatMemoryTimestamp(memory.timestamp))
+                    append("] ")
                     if (memory.title.isNotBlank()) append(memory.title).append(": ")
-                    append(memory.content.replace('\n', ' ').take(280))
+                    append(memory.content.replace('\n', ' ').take(600))
                     append('\n')
                 }
             }
@@ -529,6 +550,11 @@ object ChatController {
                 .take(5)
         }
     }
+
+    private fun formatMemoryTimestamp(timestamp: Long): String =
+        MEMORY_TIME_FORMATTER.format(
+            Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()),
+        )
 
     private suspend fun recordAction(goal: String, summary: String, steps: List<String>) {
         withContext(Dispatchers.IO) {
