@@ -29,6 +29,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,7 +89,7 @@ fun ModelsScreen() {
 
         ModelCard(
             title = "Embedding model",
-            hint = "Optional · 384-d .gguf (MiniLM, bge-small)",
+            hint = "Optional \u00B7 384-d .gguf (MiniLM, bge-small)",
             selection = embeddingSelection,
             status = embeddingStatus,
             onChoose = { embeddingPicker.launch(arrayOf("*/*")) },
@@ -123,9 +124,10 @@ private fun ModelCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(20.dp))
+            .shadow(3.dp, RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(24.dp))
             .background(Elevated)
-            .border(1.dp, Border, RoundedCornerShape(20.dp))
+            .border(1.dp, Border, RoundedCornerShape(24.dp))
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -154,7 +156,7 @@ private fun ModelCard(
         Spacer(Modifier.height(2.dp))
 
         Text(
-            text = selection?.let { "${formatSize(it.size)} · $hint" } ?: hint,
+            text = selection?.let { "${formatSize(it.size)} \u00B7 $hint" } ?: hint,
             color = TextSecondary,
             fontSize = 11.sp,
         )
@@ -227,7 +229,7 @@ private fun PillButton(label: String, filled: Boolean, enabled: Boolean, onClick
 
 private fun statusLabel(status: ModelStatus): String = when (status) {
     ModelStatus.Unloaded -> "Unloaded"
-    ModelStatus.Loading -> "Loading…"
+    ModelStatus.Loading -> "Loading..."
     ModelStatus.Ready -> "Ready"
     is ModelStatus.Error -> "Error"
 }
@@ -238,3 +240,4 @@ private fun formatSize(bytes: Long): String = when {
     bytes > 0 -> String.format(Locale.US, "%d KB", bytes / 1024)
     else -> "Size unknown"
 }
+

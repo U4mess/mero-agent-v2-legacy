@@ -11,19 +11,18 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * AES-GCM encryption backed by the Android Keystore. Only the ciphertext is written
+ * AES-GCM encryption backed by the Android Keystore. Only ciphertext is written
  * to SharedPreferences; the key never leaves the keystore.
  */
 internal object SecureStore {
 
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val KEY_ALIAS = "ume_cloud_api_key"
-    private const val PREF_KEY = "deepseek_api_key"
     private const val GCM_TAG_BITS = 128
 
-    fun save(prefs: SharedPreferences, value: String) {
+    fun save(prefs: SharedPreferences, storageKey: String, value: String) {
         if (value.isBlank()) {
-            prefs.edit().remove(PREF_KEY).apply()
+            prefs.edit().remove(storageKey).apply()
             return
         }
         runCatching {
@@ -36,13 +35,13 @@ internal object SecureStore {
             iv.copyInto(blob, 1)
             encrypted.copyInto(blob, 1 + iv.size)
             prefs.edit()
-                .putString(PREF_KEY, Base64.encodeToString(blob, Base64.NO_WRAP))
+                .putString(storageKey, Base64.encodeToString(blob, Base64.NO_WRAP))
                 .apply()
         }
     }
 
-    fun load(prefs: SharedPreferences): String? = runCatching {
-        val encoded = prefs.getString(PREF_KEY, null) ?: return@runCatching null
+    fun load(prefs: SharedPreferences, storageKey: String): String? = runCatching {
+        val encoded = prefs.getString(storageKey, null) ?: return@runCatching null
         val blob = Base64.decode(encoded, Base64.NO_WRAP)
         if (blob.size < 3) return@runCatching null
         val ivSize = blob[0].toInt()

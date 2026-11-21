@@ -23,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
@@ -44,15 +46,21 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.u4mess.ume.ui.Black
-import com.u4mess.ume.ui.Border
-import com.u4mess.ume.ui.TextPrimary
-import com.u4mess.ume.ui.TextSecondary
+import com.u4mess.ume.ui.MonkeyMood
+import com.u4mess.ume.ui.UmeMonkeyFace
+
+private val IslandBackground = Color(0xFF000000)
+private val IslandBorder = Color(0xFF1F1F1F)
+private val IslandText = Color(0xFFFFFFFF)
+private val IslandTextSecondary = Color(0xFFA0A0A0)
 
 @Composable
 internal fun DynamicIsland(
     expanded: Boolean,
     agentStatus: AgentStatus?,
+    approval: ApprovalRequest?,
+    onApprove: () -> Unit,
+    onCancelApproval: () -> Unit,
     onExpand: () -> Unit,
     onCollapse: () -> Unit,
     onSend: (String) -> Unit,
@@ -63,13 +71,20 @@ internal fun DynamicIsland(
     val focusManager = LocalFocusManager.current
     val interactionSource = remember { MutableInteractionSource() }
     val screenWidth = LocalConfiguration.current.screenWidthDp
+    val idleWidth = IslandSettings.widthDp.collectAsState().value
     val statusMode = agentStatus != null
+    val statusMood = when {
+        agentStatus == null -> MonkeyMood.IDLE
+        agentStatus.active && agentStatus.text.contains("Thinking", ignoreCase = true) -> MonkeyMood.THINKING
+        agentStatus.active -> MonkeyMood.ACTING
+        else -> MonkeyMood.IDLE
+    }
 
     val width by animateDpAsState(
         targetValue = when {
             statusMode -> (screenWidth - 72).dp
             expanded -> (screenWidth - 32).dp
-            else -> 110.dp
+            else -> idleWidth.dp
         },
         animationSpec = tween(260, easing = FastOutSlowInEasing),
         label = "islandWidth",
@@ -78,7 +93,7 @@ internal fun DynamicIsland(
         targetValue = when {
             statusMode -> 40.dp
             expanded -> 52.dp
-            else -> 28.dp
+            else -> 24.dp
         },
         animationSpec = tween(260, easing = FastOutSlowInEasing),
         label = "islandHeight",
@@ -87,7 +102,7 @@ internal fun DynamicIsland(
         targetValue = when {
             statusMode -> 20.dp
             expanded -> 26.dp
-            else -> 14.dp
+            else -> 12.dp
         },
         animationSpec = tween(260, easing = FastOutSlowInEasing),
         label = "islandCorner",
@@ -119,8 +134,8 @@ internal fun DynamicIsland(
             .width(width)
             .height(height)
             .clip(RoundedCornerShape(corner))
-            .background(Black)
-            .border(1.dp, Border, RoundedCornerShape(corner))
+            .background(IslandBackground)
+            .border(1.dp, IslandBorder, RoundedCornerShape(corner))
             .then(
                 if (expanded || statusMode) {
                     Modifier
@@ -138,45 +153,54 @@ internal fun DynamicIsland(
             )
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Start,
+        horizontalArrangement = if (agentStatus == null && !expanded) {
+            Arrangement.End
+        } else {
+            Arrangement.Start
+        },
     ) {
         if (agentStatus != null) {
-            Box(
-                Modifier
-                    .size(7.dp)
-                    .clip(CircleShape)
-                    .background(TextPrimary),
+            UmeMonkeyFace(
+                Modifier.size(22.dp),
+                mood = if (approval != null) MonkeyMood.ACTING else statusMood,
             )
-            Spacer(Modifier.width(9.dp))
+            Spacer(Modifier.width(8.dp))
             Text(
-                text = agentStatus.text,
-                color = TextPrimary,
+                text = approval?.prompt ?: agentStatus.text,
+                color = IslandText,
                 fontSize = 11.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            if (agentStatus.active) {
+            if (approval != null) {
+                Spacer(Modifier.width(6.dp))
+                IslandAction("Approve", filled = true, onClick = onApprove)
+                Spacer(Modifier.width(4.dp))
+                IslandAction("Cancel", filled = false, onClick = onCancelApproval)
+            } else if (agentStatus.active) {
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = "Stop",
-                    color = Black,
+                    color = IslandBackground,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
-                        .background(TextPrimary)
+                        .background(IslandText)
                         .clickable(onClick = onStopAgent)
                         .padding(horizontal = 10.dp, vertical = 5.dp),
                 )
             }
         } else if (expanded) {
+            UmeMonkeyFace(Modifier.size(22.dp), mood = MonkeyMood.THINKING)
+            Spacer(Modifier.width(8.dp))
             BasicTextField(
                 value = prompt,
                 onValueChange = { prompt = it },
                 singleLine = true,
-                textStyle = TextStyle(color = TextPrimary, fontSize = 14.sp),
-                cursorBrush = SolidColor(TextPrimary),
+                textStyle = TextStyle(color = IslandText, fontSize = 14.sp),
+                cursorBrush = SolidColor(IslandText),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { send() }),
                 modifier = Modifier
@@ -185,7 +209,7 @@ internal fun DynamicIsland(
                 decorationBox = { innerTextField ->
                     Box {
                         if (prompt.isEmpty()) {
-                            Text("Ask Ume…", color = TextSecondary, fontSize = 14.sp)
+                            Text("Ask Ume...", color = IslandTextSecondary, fontSize = 14.sp)
                         }
                         innerTextField()
                     }
@@ -196,34 +220,45 @@ internal fun DynamicIsland(
                 modifier = Modifier
                     .height(30.dp)
                     .clip(RoundedCornerShape(15.dp))
-                    .background(TextPrimary)
+                    .background(IslandText)
                     .clickable(onClick = ::send)
                     .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("Send", color = Black, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("Send", color = IslandBackground, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.width(6.dp))
             Box(
                 modifier = Modifier
                     .size(30.dp)
                     .clip(CircleShape)
-                    .border(1.dp, Border, CircleShape)
+                    .border(1.dp, IslandBorder, CircleShape)
                     .clickable(onClick = onCollapse)
                     .semantics { contentDescription = "Close" },
                 contentAlignment = Alignment.Center,
             ) {
-                Text("×", color = TextSecondary, fontSize = 16.sp)
+                Text("\u00D7", color = IslandTextSecondary, fontSize = 16.sp)
             }
         } else {
-            Box(
-                Modifier
-                    .size(7.dp)
-                    .clip(CircleShape)
-                    .background(TextPrimary),
-            )
-            Spacer(Modifier.width(9.dp))
-            Text("Ume", color = TextPrimary, fontSize = 12.sp, letterSpacing = 0.6.sp)
+            UmeMonkeyFace(Modifier.size(20.dp), mood = MonkeyMood.IDLE)
         }
     }
 }
+
+@Composable
+private fun IslandAction(label: String, filled: Boolean, onClick: () -> Unit) {
+    Text(
+        text = label,
+        color = if (filled) IslandBackground else IslandText,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (filled) IslandText else Color.Transparent)
+            .border(1.dp, if (filled) IslandText else IslandBorder, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    )
+}
+

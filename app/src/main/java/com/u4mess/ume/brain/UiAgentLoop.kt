@@ -4,16 +4,28 @@ import android.content.Context
 import android.content.Intent
 import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
 import com.u4mess.ume.sensors.ScrollDirection
-import com.u4mess.ume.settings.CloudSettings
+import com.u4mess.ume.service.IslandAgent
 import java.util.Locale
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 
+data class AgentStep(
+    val step: Int,
+    val action: String,
+    val label: String,
+    val packageName: String?,
+    val nodeId: Int?,
+    val ok: Boolean,
+    val detail: String,
+    val latencyMs: Long,
+)
+
 data class UiAgentResult(
     val success: Boolean,
     val message: String,
     val steps: List<String>,
+    val details: List<AgentStep> = emptyList(),
 )
 
 object UiAgentLoop {
@@ -43,6 +55,10 @@ object UiAgentLoop {
 
     private val actions = setOf(
         "OPEN_APP", "CLICK", "TYPE", "SCROLL", "BACK", "HOME", "DONE", "FAIL",
+    )
+
+    private val sensitiveKeywords = listOf(
+        "send", "pay", "buy", "order", "delete", "confirm", "submit",
     )
 
     private val systemPrompt = """
@@ -82,49 +98,97 @@ object UiAgentLoop {
 
         val apps = launchableApps(context)
         val history = mutableListOf<String>()
+        val details = mutableListOf<AgentStep>()
         var lastDetail = ""
 
         for (step in 1..MAX_STEPS) {
             val service = ScreenReaderAccessibilityService.instance
-                ?: return UiAgentResult(false, "Accessibility service disconnected.", history)
+                ?: return UiAgentResult(false, "Accessibility service disconnected.", history, details)
 
             val rawTree = runCatching { service.captureUiTreeJson() }.getOrDefault("[]")
-            val (tree, nodeIds) = compactTree(rawTree)
+            val (tree, nodeIds, nodeTexts) = compactTree(rawTree)
             if (nodeIds.isEmpty()) {
-                return UiAgentResult(false, "Couldn't read the current screen.", history)
+                return UiAgentResult(false, "Couldn't read the current screen.", history, details)
             }
 
-            onStatus("$step/$MAX_STEPS · Thinking…")
+            onStatus("$step/$MAX_STEPS \u00B7 Thinking...")
 
-            val content = DeepSeekClient.completeJson(
+            val content = CloudLlmClient.completeJson(
                 systemPrompt = systemPrompt,
                 userPrompt = buildPrompt(goal, apps, history, tree, step),
-                model = CloudSettings.model.value,
                 maxTokens = 320,
             ).getOrElse { throwable ->
                 return UiAgentResult(
                     false,
-                    throwable.message ?: "DeepSeek request failed.",
+                    throwable.message ?: "Cloud request failed.",
                     history,
+                    details,
                 )
             }
 
             val action = parseAction(content)
-                ?: return UiAgentResult(false, "DeepSeek returned an unreadable action.", history)
+                ?: return UiAgentResult(
+                    false,
+                    "The cloud model returned an unreadable action.",
+                    history,
+                    details,
+                )
 
             when (action.name) {
-                "DONE" -> return UiAgentResult(true, action.message.ifBlank { "Done." }, history)
+                "DONE" -> return UiAgentResult(
+                    true,
+                    action.message.ifBlank { "Done." },
+                    history,
+                    details,
+                )
                 "FAIL" -> return UiAgentResult(
                     false,
                     action.reason.ifBlank { "The agent stopped." },
                     history,
+                    details,
                 )
             }
 
+            if (action.name == "CLICK") {
+                val target = action.nodeId?.let { nodeTexts[it] }.orEmpty()
+                if (sensitiveKeywords.any { target.contains(it, ignoreCase = true) }) {
+                    onStatus("$step/$MAX_STEPS \u00B7 Approval needed")
+                    val approved = IslandAgent.requestApproval(
+                        "Tap \"${target.ifBlank { action.reason.ifBlank { "this control" } }.take(48)}\"?",
+                    )
+                    if (!approved) {
+                        details += AgentStep(
+                            step = step,
+                            action = "CLICK",
+                            label = "Cancelled",
+                            packageName = action.packageName,
+                            nodeId = action.nodeId,
+                            ok = false,
+                            detail = "Approval declined",
+                            latencyMs = 0,
+                        )
+                        history += "$step. Cancelled \u00B7 approval declined"
+                        return UiAgentResult(false, "Stopped by user.", history, details)
+                    }
+                }
+            }
+
             val label = actionLabel(action, apps)
-            onStatus("$step/$MAX_STEPS · $label")
-            val outcome = execute(context, service, action, nodeIds)
-            history += "$step. $label — ${if (outcome.ok) "ok" else "failed"}: ${outcome.detail}"
+            onStatus("$step/$MAX_STEPS \u00B7 $label")
+            val startedAt = System.currentTimeMillis()
+            val outcome = execute(context, service, action, nodeIds, apps)
+            val latency = System.currentTimeMillis() - startedAt
+            details += AgentStep(
+                step = step,
+                action = action.name,
+                label = label,
+                packageName = action.packageName,
+                nodeId = action.nodeId,
+                ok = outcome.ok,
+                detail = outcome.detail,
+                latencyMs = latency,
+            )
+            history += "$step. $label - ${if (outcome.ok) "ok" else "failed"}: ${outcome.detail}"
             lastDetail = outcome.detail
             delay(SETTLE_MS)
         }
@@ -133,6 +197,7 @@ object UiAgentLoop {
             false,
             lastDetail.ifBlank { "Reached 10 steps without finishing." },
             history,
+            details,
         )
     }
 
@@ -156,10 +221,12 @@ object UiAgentLoop {
         appendLine(tree)
     }
 
-    private fun compactTree(raw: String): Pair<String, Map<Int, String>> {
-        val array = runCatching { JSONArray(raw) }.getOrNull() ?: return "[]" to emptyMap()
+    private fun compactTree(raw: String): Triple<String, Map<Int, String>, Map<Int, String>> {
+        val array = runCatching { JSONArray(raw) }.getOrNull()
+            ?: return Triple("[]", emptyMap(), emptyMap())
         val nodes = JSONArray()
         val ids = LinkedHashMap<Int, String>()
+        val texts = LinkedHashMap<Int, String>()
 
         for (index in 0 until array.length()) {
             if (ids.size >= MAX_UI_NODES) break
@@ -167,6 +234,7 @@ object UiAgentLoop {
             val accessibilityId = node.optString("id").takeIf { it.isNotBlank() } ?: continue
             val nodeId = ids.size
             ids[nodeId] = accessibilityId
+            texts[nodeId] = "${node.optString("text")} ${node.optString("desc")}".trim()
             nodes.put(
                 JSONObject().apply {
                     put("nodeId", nodeId)
@@ -180,7 +248,7 @@ object UiAgentLoop {
             )
         }
 
-        return nodes.toString() to ids
+        return Triple(nodes.toString(), ids, texts)
     }
 
     private fun parseAction(content: String): Action? {
@@ -218,21 +286,29 @@ object UiAgentLoop {
         service: ScreenReaderAccessibilityService,
         action: Action,
         nodeIds: Map<Int, String>,
+        apps: List<InstalledApp>,
     ): StepOutcome = when (action.name) {
         "OPEN_APP" -> {
-            val packageName = action.packageName
-            if (packageName.isNullOrBlank()) {
-                StepOutcome(false, "OPEN_APP needs a package.")
+            val requested = action.packageName?.trim()
+            if (requested.isNullOrBlank()) {
+                StepOutcome(false, "OPEN_APP needs a package or app name.")
             } else {
-                val intent = context.packageManager.getLaunchIntentForPackage(packageName)
-                if (intent == null) {
-                    StepOutcome(false, "No launchable app found for $packageName.")
+                val packageName = resolvePackage(context, requested, apps)
+                if (packageName == null) {
+                    StepOutcome(false, "No installed app matches \"$requested\".")
                 } else {
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    runCatching { context.startActivity(intent) }.fold(
-                        onSuccess = { StepOutcome(true, "Opened $packageName.") },
-                        onFailure = { StepOutcome(false, it.message ?: "Could not open $packageName.") },
-                    )
+                    val intent = context.packageManager.getLaunchIntentForPackage(packageName)
+                    if (intent == null) {
+                        StepOutcome(false, "No launchable app found for $packageName.")
+                    } else {
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        runCatching { context.startActivity(intent) }.fold(
+                            onSuccess = { StepOutcome(true, "Opened $packageName.") },
+                            onFailure = {
+                                StepOutcome(false, it.message ?: "Could not open $packageName.")
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -282,6 +358,23 @@ object UiAgentLoop {
         }
 
         else -> StepOutcome(false, "Unsupported action ${action.name}.")
+    }
+
+    private fun resolvePackage(
+        context: Context,
+        requested: String,
+        apps: List<InstalledApp>,
+    ): String? {
+        val packageManager = context.packageManager
+        if (packageManager.getLaunchIntentForPackage(requested) != null) return requested
+
+        apps.firstOrNull { it.packageName.equals(requested, ignoreCase = true) }
+            ?.let { return it.packageName }
+
+        apps.firstOrNull { it.label.equals(requested, ignoreCase = true) }
+            ?.let { return it.packageName }
+
+        return apps.firstOrNull { it.label.contains(requested, ignoreCase = true) }?.packageName
     }
 
     private fun actionLabel(action: Action, apps: List<InstalledApp>): String {

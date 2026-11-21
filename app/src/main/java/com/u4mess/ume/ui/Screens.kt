@@ -1,12 +1,17 @@
 package com.u4mess.ume.ui
 
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.BroadcastReceiver
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
+import android.os.BatteryManager
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import android.widget.Toast
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,13 +24,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -55,7 +64,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -84,8 +102,13 @@ import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
 import com.u4mess.ume.service.DynamicIslandService
 import com.u4mess.ume.service.IslandSettings
 import com.u4mess.ume.service.IslandState
+import com.u4mess.ume.settings.CloudProvider
 import com.u4mess.ume.settings.CloudSettings
+import com.u4mess.ume.settings.ThemeMode
+import com.u4mess.ume.settings.ThemeSettings
 import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -105,10 +128,18 @@ fun MemoryScreen() {
     var keyword by rememberSaveable { mutableStateOf("") }
     var sourceFilter by rememberSaveable { mutableStateOf("") }
     var memories by remember { mutableStateOf<List<MemoryEntity>>(emptyList()) }
+    val charging = rememberCharging()
+    var latestSummary by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(keyword, sourceFilter, revisions) {
         memories = withContext(Dispatchers.IO) {
             repository.search(keyword, sourceFilter.ifBlank { null })
+        }
+    }
+
+    LaunchedEffect(revisions) {
+        latestSummary = withContext(Dispatchers.IO) {
+            repository.search(source = MemorySource.SUMMARY, limit = 1).firstOrNull()?.content
         }
     }
 
@@ -164,6 +195,14 @@ fun MemoryScreen() {
             }
         }
 
+        MemoryHero(
+            charging = charging,
+            latestSummary = latestSummary,
+            modifier = Modifier.padding(horizontal = 20.dp),
+        )
+
+        Spacer(Modifier.height(10.dp))
+
         Column(Modifier.padding(horizontal = 20.dp)) {
             MemorySearchField(keyword, onValueChange = { keyword = it })
             Spacer(Modifier.height(10.dp))
@@ -206,20 +245,28 @@ fun MemoryScreen() {
                 modifier = Modifier.weight(1f),
             )
         } else {
-            LazyColumn(
+            val grouped = memories.groupBy { dateBucket(it.timestamp) }
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 24.dp),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(memories, key = { it.id }) { memory ->
-                    MemoryCard(
-                        memory = memory,
-                        onDelete = {
-                            scope.launch(Dispatchers.IO) { repository.delete(memory.id) }
-                        },
-                    )
+                grouped.forEach { (label, group) ->
+                    item(key = "date_$label", span = { GridItemSpan(maxLineSpan) }) {
+                        DateHeader(label)
+                    }
+                    items(group, key = { it.id }) { memory ->
+                        BentoMemoryCard(
+                            memory = memory,
+                            onDelete = {
+                                scope.launch(Dispatchers.IO) { repository.delete(memory.id) }
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -254,11 +301,15 @@ fun SettingsScreen() {
             }
     }
     val islandRunning by IslandState.running.collectAsState()
+    val themeMode by ThemeSettings.mode.collectAsState()
     val cloudEnabled by CloudSettings.enabled.collectAsState()
+    val cloudProvider by CloudSettings.provider.collectAsState()
     val cloudModel by CloudSettings.model.collectAsState()
-    var apiKey by remember { mutableStateOf(CloudSettings.apiKey().orEmpty()) }
-    var keySaved by remember { mutableStateOf(CloudSettings.hasKey()) }
+    val customBaseUrl by CloudSettings.baseUrl.collectAsState()
+    var apiKey by remember(cloudProvider) { mutableStateOf(CloudSettings.apiKey().orEmpty()) }
+    var keySaved by remember(cloudProvider) { mutableStateOf(CloudSettings.hasKey()) }
     var yOffset by remember { mutableFloatStateOf(IslandSettings.yOffsetDp.value.toFloat()) }
+    var islandWidth by remember { mutableFloatStateOf(IslandSettings.widthDp.value.toFloat()) }
 
     Column(
         Modifier
@@ -271,9 +322,45 @@ fun SettingsScreen() {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 8.dp)
-                .clip(RoundedCornerShape(20.dp))
+                .shadow(3.dp, RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(24.dp))
                 .background(Elevated)
-                .border(1.dp, Border, RoundedCornerShape(20.dp)),
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+        ) {
+            Text(
+                text = "Appearance",
+                color = TextSecondary,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 8.dp),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                ThemeMode.entries.forEach { option ->
+                    ModelOptionPill(
+                        label = option.label,
+                        selected = themeMode == option,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        ThemeSettings.setMode(option)
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .shadow(3.dp, RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(24.dp))
+                .background(Elevated)
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
         ) {
             Text(
                 text = "Permissions",
@@ -382,6 +469,44 @@ fun SettingsScreen() {
                         .fillMaxWidth()
                         .padding(top = 2.dp),
                 )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 6.dp),
+                ) {
+                    Text(
+                        text = "Dynamic Island Width",
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "${islandWidth.roundToInt()} dp",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                Slider(
+                    value = islandWidth,
+                    onValueChange = {
+                        islandWidth = it
+                        IslandSettings.previewWidth(it.roundToInt())
+                    },
+                    onValueChangeFinished = {
+                        IslandSettings.persistWidth(islandWidth.roundToInt())
+                    },
+                    valueRange = IslandSettings.MIN_WIDTH_DP.toFloat()..IslandSettings.MAX_WIDTH_DP.toFloat(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = TextPrimary,
+                        activeTrackColor = TextPrimary,
+                        inactiveTrackColor = Border,
+                        activeTickColor = TextPrimary,
+                        inactiveTickColor = Border,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                )
             }
         }
 
@@ -391,21 +516,91 @@ fun SettingsScreen() {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .clip(RoundedCornerShape(20.dp))
+                .shadow(3.dp, RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(24.dp))
                 .background(Elevated)
-                .border(1.dp, Border, RoundedCornerShape(20.dp)),
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
         ) {
             Text(
-                text = "Cloud Action Brain (DeepSeek)",
+                text = "Cloud Action Brain",
                 color = TextSecondary,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 8.dp),
             )
 
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CloudProvider.entries.forEach { option ->
+                    item(key = option.id) {
+                        ModelOptionPill(
+                            label = option.label,
+                            selected = cloudProvider == option,
+                            modifier = Modifier.width(94.dp),
+                        ) {
+                            CloudSettings.selectProvider(option)
+                        }
+                    }
+                }
+            }
+
+            if (cloudProvider == CloudProvider.CUSTOM) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 20.dp, top = 12.dp),
+                ) {
+                    Text("Base URL", color = TextSecondary, fontSize = 12.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Black)
+                            .border(1.dp, Border, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BasicTextField(
+                            value = customBaseUrl,
+                            onValueChange = CloudSettings::setBaseUrl,
+                            singleLine = true,
+                            textStyle = TextStyle(color = TextPrimary, fontSize = 12.sp),
+                            cursorBrush = SolidColor(TextPrimary),
+                            modifier = Modifier.weight(1f),
+                            decorationBox = { innerTextField ->
+                                Box {
+                                    if (customBaseUrl.isEmpty()) {
+                                        Text(
+                                            "https://host/v1",
+                                            color = TextSecondary,
+                                            fontSize = 12.sp,
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            },
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text = cloudProvider.endpoint,
+                    color = TextSecondary,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp),
+                )
+            }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
+                    .padding(start = 20.dp, end = 20.dp, top = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(
@@ -430,7 +625,7 @@ fun SettingsScreen() {
                         decorationBox = { innerTextField ->
                             Box {
                                 if (apiKey.isEmpty()) {
-                                    Text("DeepSeek API key", color = TextSecondary, fontSize = 13.sp)
+                                    Text("API key", color = TextSecondary, fontSize = 13.sp)
                                 }
                                 innerTextField()
                             }
@@ -492,21 +687,34 @@ fun SettingsScreen() {
                     .fillMaxWidth()
                     .padding(start = 20.dp, end = 20.dp, top = 14.dp),
             ) {
-                Text("Model", color = TextSecondary, fontSize = 12.sp)
+                Text("Model ID", color = TextSecondary, fontSize = 12.sp)
                 Spacer(Modifier.height(6.dp))
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Black)
+                        .border(1.dp, Border, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    CloudSettings.models.forEach { option ->
-                        ModelOptionPill(
-                            label = option,
-                            selected = cloudModel == option,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            CloudSettings.setModel(option)
-                        }
-                    }
+                    BasicTextField(
+                        value = cloudModel,
+                        onValueChange = CloudSettings::setModel,
+                        singleLine = true,
+                        textStyle = TextStyle(color = TextPrimary, fontSize = 13.sp),
+                        cursorBrush = SolidColor(TextPrimary),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { innerTextField ->
+                            Box {
+                                if (cloudModel.isEmpty()) {
+                                    Text("model-id", color = TextSecondary, fontSize = 13.sp)
+                                }
+                                innerTextField()
+                            }
+                        },
+                    )
                 }
             }
 
@@ -520,9 +728,9 @@ fun SettingsScreen() {
                     Text("Hybrid Cloud Actions", color = TextPrimary, fontSize = 15.sp)
                     Text(
                         text = if (cloudEnabled) {
-                            "Phone actions through DeepSeek"
+                            "Phone actions through ${cloudProvider.label}"
                         } else {
-                            "Off — action prompts will ask you to enable it"
+                            "Off - action prompts will ask you to enable it"
                         },
                         color = TextSecondary,
                         fontSize = 12.sp,
@@ -549,9 +757,10 @@ fun SettingsScreen() {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .clip(RoundedCornerShape(20.dp))
+                .shadow(3.dp, RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(24.dp))
                 .background(Elevated)
-                .border(1.dp, Border, RoundedCornerShape(20.dp)),
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
         ) {
             Text(
                 text = "Maintenance",
@@ -619,7 +828,7 @@ private fun MemorySearchField(value: String, onValueChange: (String) -> Unit) {
         )
         if (value.isNotEmpty()) {
             Text(
-                text = "×",
+                text = "Ã—",
                 color = TextSecondary,
                 fontSize = 16.sp,
                 modifier = Modifier
@@ -678,97 +887,294 @@ private fun FilterPill(label: String, selected: Boolean, onClick: () -> Unit) {
     )
 }
 
+private val AmberAccent = Color(0xFFE0A458)
+
 @Composable
-private fun MemoryCard(memory: MemoryEntity, onDelete: () -> Unit) {
-    val title = memory.title.ifBlank {
-        when (memory.source) {
-            MemorySource.NOTIFICATION -> "Notification"
-            MemorySource.SCREEN -> "Screen capture"
-            else -> "Memory"
+private fun MemoryHero(charging: Boolean, latestSummary: String?, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(24.dp)
+    val greeting = remember { greetingForHour(LocalTime.now().hour) }
+    val status = if (charging) "On the charger" else "Ready on-device"
+    val summary = latestSummary?.replace('\n', ' ')?.take(150)
+        ?: "Everything you notice, remembered on this device."
+
+    Box(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(6.dp, shape)
+                .clip(shape)
+                .background(Elevated)
+                .border(1.dp, Border, shape)
+                .padding(20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(if (charging) AmberAccent else TextPrimary),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = status,
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.6.sp,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = greeting,
+                color = TextPrimary,
+                fontFamily = UmeSerif,
+                fontSize = 27.sp,
+                lineHeight = 31.sp,
+                modifier = Modifier.fillMaxWidth(0.72f),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = summary,
+                color = TextSecondary,
+                fontFamily = UmeSerif,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(0.72f),
+            )
+        }
+
+        UmeMonkeyFace(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .offset(x = 14.dp, y = (-12).dp)
+                .size(66.dp),
+            mood = if (charging) MonkeyMood.CHARGING else MonkeyMood.IDLE,
+        )
+    }
+}
+
+@Composable
+private fun DateHeader(label: String) {
+    Text(
+        text = label,
+        color = TextSecondary,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = 0.5.sp,
+        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+    )
+}
+
+@Composable
+private fun BentoMemoryCard(memory: MemoryEntity, onDelete: () -> Unit) {
+    val shape = RoundedCornerShape(22.dp)
+    val title = memory.title.ifBlank { memoryFallbackTitle(memory.source) }
+    val packageLabel = memory.packageName.ifBlank {
+        if (memory.source == MemorySource.ACTION || memory.source == MemorySource.SUMMARY) {
+            "Ume Agent"
+        } else {
+            "unknown"
         }
     }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .heightIn(min = 148.dp)
+            .shadow(2.dp, shape)
+            .clip(shape)
             .background(Elevated)
-            .border(1.dp, Border, RoundedCornerShape(16.dp))
-            .padding(16.dp),
+            .border(1.dp, Border, shape)
+            .padding(13.dp),
     ) {
-        Row(verticalAlignment = Alignment.Top) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BentoSourceIcon(memory.source)
+            Spacer(Modifier.width(6.dp))
             Text(
-                text = title,
-                color = TextPrimary,
-                fontSize = 15.sp,
+                text = memorySourceLabel(memory.source),
+                color = TextSecondary,
+                fontSize = 9.sp,
                 fontWeight = FontWeight.Medium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+                letterSpacing = 0.7.sp,
+                maxLines = 1,
                 modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.width(12.dp))
             Text(
-                text = "Delete",
+                text = "\u00D7",
                 color = TextSecondary,
-                fontSize = 12.sp,
+                fontSize = 15.sp,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(CircleShape)
                     .clickable(onClick = onDelete)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .padding(horizontal = 5.dp)
+                    .semantics { contentDescription = "Delete memory" },
             )
         }
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = title,
+            color = TextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            lineHeight = 17.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
 
         if (memory.content.isNotBlank()) {
             Spacer(Modifier.height(4.dp))
             Text(
-                text = memory.content,
+                text = memory.content.replace('\n', ' '),
                 color = TextSecondary,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
-                maxLines = 4,
+                fontSize = 11.5.sp,
+                lineHeight = 15.sp,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = memory.source.ifBlank { "memory" }.uppercase(Locale.getDefault()),
-                color = TextSecondary,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 0.8.sp,
-            )
-            Spacer(Modifier.width(8.dp))
-            Box(
-                Modifier
-                    .size(2.dp)
-                    .clip(CircleShape)
-                    .background(Border),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = memory.packageName.ifBlank {
-                    when (memory.source) {
-                        MemorySource.ACTION, MemorySource.SUMMARY -> "Ume Agent"
-                        else -> "unknown"
-                    }
-                },
-                color = TextSecondary,
-                fontSize = 11.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = formatTimestamp(memory.timestamp),
-                color = TextSecondary,
-                fontSize = 11.sp,
-            )
+        Text(
+            text = "$packageLabel \u00B7 ${formatTimestamp(memory.timestamp)}",
+            color = TextSecondary,
+            fontSize = 9.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun BentoSourceIcon(source: String) {
+    val tint = when (source) {
+        MemorySource.ACTION -> AmberAccent
+        MemorySource.SUMMARY -> Color(0xFFB07A52)
+        else -> TextSecondary
+    }
+    Canvas(Modifier.size(12.dp)) {
+        val w = size.width
+        val h = size.height
+        val stroke = Stroke(
+            width = 1.1.dp.toPx(),
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round,
+        )
+
+        when (source) {
+            MemorySource.NOTIFICATION -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(w * 0.1f, h * 0.16f),
+                    size = Size(w * 0.8f, h * 0.52f),
+                    cornerRadius = CornerRadius(w * 0.16f),
+                    style = stroke,
+                )
+                val tail = Path().apply {
+                    moveTo(w * 0.34f, h * 0.68f)
+                    lineTo(w * 0.34f, h * 0.88f)
+                    lineTo(w * 0.52f, h * 0.68f)
+                }
+                drawPath(tail, tint, style = stroke)
+            }
+
+            MemorySource.SCREEN -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(w * 0.12f, h * 0.18f),
+                    size = Size(w * 0.76f, h * 0.64f),
+                    cornerRadius = CornerRadius(w * 0.12f),
+                    style = stroke,
+                )
+                drawLine(tint, Offset(w * 0.28f, h * 0.42f), Offset(w * 0.72f, h * 0.42f), 1.1.dp.toPx(), StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.28f, h * 0.62f), Offset(w * 0.58f, h * 0.62f), 1.1.dp.toPx(), StrokeCap.Round)
+            }
+
+            MemorySource.ACTION -> {
+                val check = Path().apply {
+                    moveTo(w * 0.18f, h * 0.55f)
+                    lineTo(w * 0.42f, h * 0.76f)
+                    lineTo(w * 0.84f, h * 0.26f)
+                }
+                drawPath(check, tint, style = stroke)
+            }
+
+            MemorySource.SUMMARY -> {
+                for (i in 0..2) {
+                    val y = h * (0.3f + i * 0.2f)
+                    drawLine(
+                        color = tint,
+                        start = Offset(w * 0.16f, y),
+                        end = Offset(w * (if (i == 2) 0.64f else 0.84f), y),
+                        strokeWidth = 1.1.dp.toPx(),
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
+
+            else -> drawCircle(tint, w * 0.18f, Offset(w * 0.5f, h * 0.5f), style = stroke)
         }
     }
+}
+
+@Composable
+internal fun rememberCharging(): Boolean {
+    val context = LocalContext.current
+    var charging by remember { mutableStateOf(isCharging(context)) }
+
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(receiverContext: Context?, intent: Intent?) {
+                val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+                charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                    status == BatteryManager.BATTERY_STATUS_FULL
+            }
+        }
+        context.registerReceiver(receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        onDispose { runCatching { context.unregisterReceiver(receiver) } }
+    }
+
+    return charging
+}
+
+private fun isCharging(context: Context): Boolean =
+    context.getSystemService(BatteryManager::class.java)?.isCharging == true
+
+private fun memorySourceLabel(source: String): String = when (source) {
+    MemorySource.NOTIFICATION -> "NOTIFICATION"
+    MemorySource.SCREEN -> "SCREEN"
+    MemorySource.ACTION -> "ACTION"
+    MemorySource.SUMMARY -> "SUMMARY"
+    else -> source.uppercase(Locale.getDefault())
+}
+
+private fun memoryFallbackTitle(source: String): String = when (source) {
+    MemorySource.NOTIFICATION -> "Notification"
+    MemorySource.SCREEN -> "Screen capture"
+    MemorySource.ACTION -> "Agent action"
+    MemorySource.SUMMARY -> "Daily summary"
+    else -> "Memory"
+}
+
+private fun dateBucket(timestamp: Long): String {
+    val date = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
+    val today = LocalDate.now()
+    return when (date) {
+        today -> "Today"
+        today.minusDays(1) -> "Yesterday"
+        else -> date.format(DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()))
+    }
+}
+
+private fun greetingForHour(hour: Int): String = when (hour) {
+    in 5..11 -> "Good morning"
+    in 12..16 -> "Good afternoon"
+    in 17..21 -> "Good evening"
+    else -> "Good night"
 }
 
 @Composable
@@ -864,7 +1270,8 @@ private fun RowDivider() {
     )
 }
 
-private val TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("d MMM · HH:mm", Locale.getDefault())
+private val TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("d MMM \u00B7 HH:mm", Locale.getDefault())
 
 private fun formatTimestamp(timestamp: Long): String =
     TIMESTAMP_FORMATTER.format(Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()))
+

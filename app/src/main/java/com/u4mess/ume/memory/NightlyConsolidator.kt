@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.u4mess.ume.UmeApplication
+import com.u4mess.ume.brain.ChatController
 import com.u4mess.ume.brain.ChatRole
 import com.u4mess.ume.brain.ChatTurn
 import com.u4mess.ume.brain.LocalLlmEngine
@@ -54,6 +55,7 @@ class NightlyConsolidator(
                         content = text,
                     )
                 }
+                ChatController.postProactiveSummary(text)
             }
             Result.success()
         } catch (throwable: Throwable) {

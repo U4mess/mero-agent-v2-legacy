@@ -29,6 +29,9 @@ object ChatController {
         val role: ChatRole,
         val text: String,
         val streaming: Boolean = false,
+        val createdAt: Long = System.currentTimeMillis(),
+        val proactive: Boolean = false,
+        val agent: UiAgentResult? = null,
     )
 
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
@@ -74,6 +77,20 @@ object ChatController {
     fun send(prompt: String) {
         val text = prompt.trim()
         if (text.isNotEmpty()) pending.trySend(text)
+    }
+
+    fun postProactiveSummary(text: String) {
+        val summary = text.trim()
+        if (summary.isEmpty()) return
+        val id = nextId++
+        _messages.update {
+            it + Message(
+                id = id,
+                role = ChatRole.ASSISTANT,
+                text = summary,
+                proactive = true,
+            )
+        }
     }
 
     fun stop() {
@@ -148,9 +165,9 @@ object ChatController {
         if (!CloudSettings.hasKey()) {
             replace(
                 assistantId,
-                "Add a DeepSeek API key in Settings → Cloud Action Brain before using phone actions.",
+                "Add a ${CloudSettings.providerLabel()} API key in Settings → Cloud Action Brain before using phone actions.",
             )
-            notifyIsland("Add DeepSeek key")
+            notifyIsland("Add ${CloudSettings.providerLabel()} key")
             return
         }
         if (ScreenReaderAccessibilityService.instance == null) {
@@ -183,20 +200,27 @@ object ChatController {
 
         val result = outcome
         if (result == null) {
-            replace(assistantId, "Action stopped.")
+            val stopped = UiAgentResult(false, "Stopped by user.", emptyList())
+            replace(assistantId, "Stopped by user.")
+            setAgent(assistantId, stopped)
             IslandAgent.finish("Stopped")
             recordAction(goal, "Stopped by user.", emptyList())
         } else {
-            val summary = if (result.success) result.message else "Action failed: ${result.message}"
-            val chatText = buildString {
-                append(summary)
-                if (result.steps.isNotEmpty()) {
-                    append("\n\n")
-                    append(result.steps.takeLast(6).joinToString("\n"))
-                }
+            val stopped = result.message.contains("stopped", ignoreCase = true)
+            val summary = when {
+                stopped -> "Stopped by user."
+                result.success -> result.message
+                else -> "Action failed: ${result.message}"
             }
-            replace(assistantId, chatText)
-            IslandAgent.finish(if (result.success) "Done" else "Failed")
+            replace(assistantId, summary)
+            setAgent(assistantId, result)
+            IslandAgent.finish(
+                when {
+                    stopped -> "Stopped"
+                    result.success -> "Done"
+                    else -> "Failed"
+                },
+            )
             recordAction(goal, summary, result.steps)
         }
 
@@ -279,6 +303,12 @@ object ChatController {
     private fun replace(id: Long, text: String) {
         _messages.update { list ->
             list.map { if (it.id == id) it.copy(text = text) else it }
+        }
+    }
+
+    private fun setAgent(id: Long, result: UiAgentResult) {
+        _messages.update { list ->
+            list.map { if (it.id == id) it.copy(agent = result) else it }
         }
     }
 

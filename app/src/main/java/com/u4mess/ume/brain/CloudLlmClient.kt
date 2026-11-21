@@ -8,23 +8,38 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-object DeepSeekClient {
-
-    private const val ENDPOINT = "https://api.deepseek.com/v1/chat/completions"
+/** OpenAI-compatible chat completions client used for cloud UI actions. */
+object CloudLlmClient {
 
     suspend fun completeJson(
         systemPrompt: String,
         userPrompt: String,
-        model: String,
         maxTokens: Int = 512,
     ): Result<String> = withContext(Dispatchers.IO) {
+        val provider = CloudSettings.provider.value
         val apiKey = CloudSettings.apiKey()?.trim()
         if (apiKey.isNullOrBlank()) {
-            return@withContext Result.failure(IllegalStateException("Add a DeepSeek API key in Settings."))
+            return@withContext Result.failure(
+                IllegalStateException("Add a ${provider.label} API key in Settings."),
+            )
+        }
+
+        val endpoint = CloudSettings.endpoint()
+        if (endpoint.isBlank()) {
+            return@withContext Result.failure(
+                IllegalStateException("Set a Base URL for the Custom provider in Settings."),
+            )
+        }
+
+        val modelId = CloudSettings.modelId()
+        if (modelId.isBlank()) {
+            return@withContext Result.failure(
+                IllegalStateException("Set a Model ID for ${provider.label} in Settings."),
+            )
         }
 
         val body = JSONObject().apply {
-            put("model", model)
+            put("model", modelId)
             put("temperature", 0.1)
             put("max_tokens", maxTokens)
             put("stream", false)
@@ -39,7 +54,7 @@ object DeepSeekClient {
 
         var connection: HttpURLConnection? = null
         try {
-            connection = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
+            connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 15_000
                 readTimeout = 60_000
@@ -48,6 +63,7 @@ object DeepSeekClient {
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Authorization", "Bearer $apiKey")
+                setRequestProperty("X-Title", "Ume")
             }
 
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
@@ -57,7 +73,9 @@ object DeepSeekClient {
             val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
 
             if (code !in 200..299) {
-                return@withContext Result.failure(IllegalStateException(httpErrorMessage(code)))
+                return@withContext Result.failure(
+                    IllegalStateException(httpErrorMessage(provider.label, code)),
+                )
             }
 
             val content = JSONObject(response)
@@ -67,14 +85,14 @@ object DeepSeekClient {
                 ?.optString("content")
                 ?.takeIf { it.isNotBlank() }
                 ?: return@withContext Result.failure(
-                    IllegalStateException("DeepSeek returned an empty response."),
+                    IllegalStateException("${provider.label} returned an empty response."),
                 )
 
             Result.success(content)
         } catch (throwable: Throwable) {
             Result.failure(
                 IllegalStateException(
-                    "DeepSeek request failed: ${throwable.message ?: "network error"}",
+                    "${provider.label} request failed: ${throwable.message ?: "network error"}",
                 ),
             )
         } finally {
@@ -82,11 +100,11 @@ object DeepSeekClient {
         }
     }
 
-    private fun httpErrorMessage(code: Int): String = when (code) {
-        401 -> "DeepSeek rejected the API key (HTTP 401)."
-        402 -> "DeepSeek account has insufficient balance (HTTP 402)."
-        429 -> "DeepSeek rate limit reached. Try again shortly."
-        in 500..599 -> "DeepSeek is unavailable right now (HTTP $code)."
-        else -> "DeepSeek request failed (HTTP $code)."
+    private fun httpErrorMessage(provider: String, code: Int): String = when (code) {
+        401 -> "$provider rejected the API key (HTTP 401)."
+        402 -> "$provider account has insufficient balance (HTTP 402)."
+        429 -> "$provider rate limit reached. Try again shortly."
+        in 500..599 -> "$provider is unavailable right now (HTTP $code)."
+        else -> "$provider request failed (HTTP $code)."
     }
 }

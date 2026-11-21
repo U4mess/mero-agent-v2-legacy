@@ -71,9 +71,13 @@ class DynamicIslandService : Service() {
             setContent {
                 UmeTheme {
                     val agentStatus by IslandAgent.status.collectAsState()
+                    val approval by IslandAgent.approval.collectAsState()
                     DynamicIsland(
                         expanded = expanded.value,
                         agentStatus = agentStatus,
+                        approval = approval,
+                        onApprove = { IslandAgent.approve() },
+                        onCancelApproval = { IslandAgent.cancelApproval() },
                         onExpand = {
                             if (IslandAgent.status.value == null) setExpanded(true)
                         },
@@ -119,19 +123,30 @@ class DynamicIslandService : Service() {
         scope.launch {
             IslandSettings.yOffsetDp.collect {
                 if (!expanded.value && ::islandView.isInitialized && islandView.isAttachedToWindow) {
-                    layoutParams.y = collapsedY()
+                    layoutParams.y = restingY(IslandAgent.status.value)
                     updateLayout()
                     updateTouchRelay()
                 }
             }
         }
         scope.launch {
-            IslandAgent.status.collect { updateTouchRelay(it) }
+            IslandAgent.status.collect { status ->
+                if (!expanded.value) {
+                    animateYTo(restingY(status))
+                }
+                updateTouchRelay(status)
+            }
+        }
+        scope.launch {
+            IslandSettings.widthDp.collect {
+                if (!::islandView.isInitialized) return@collect
+                updateTouchRelay()
+            }
         }
         scope.launch {
             ScreenReaderAccessibilityService.connected.collect {
                 if (!expanded.value) {
-                    layoutParams.y = collapsedY()
+                    layoutParams.y = restingY(IslandAgent.status.value)
                     updateLayout()
                     updateTouchRelay()
                 }
@@ -168,7 +183,7 @@ class DynamicIslandService : Service() {
         } else {
             WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
         }
-        animateYTo(if (value) expandedY() else collapsedY())
+        animateYTo(if (value) expandedY() else restingY(IslandAgent.status.value))
         updateTouchRelay()
 
         if (value) {
@@ -185,17 +200,13 @@ class DynamicIslandService : Service() {
     private fun updateTouchRelay(status: AgentStatus? = IslandAgent.status.value) {
         if (!::islandView.isInitialized) return
 
-        val statusMode = status != null
         IslandTouchRelay.update(
-            visible = !expanded.value,
+            visible = !expanded.value && status == null,
             offsetDp = IslandSettings.yOffsetDp.value,
-            widthDp = if (statusMode) resources.configuration.screenWidthDp - 72 else 110,
-            heightDp = if (statusMode) 40 else 28,
+            widthDp = IslandSettings.widthDp.value,
+            heightDp = 24,
             onClick = {
-                when {
-                    status?.active == true -> IslandAgent.stop()
-                    status == null -> setExpanded(true)
-                }
+                if (IslandAgent.status.value == null) setExpanded(true)
             },
         )
     }
@@ -206,6 +217,9 @@ class DynamicIslandService : Service() {
         } else {
             dpToPx(IslandSettings.yOffsetDp.value)
         }
+
+    private fun restingY(status: AgentStatus?): Int =
+        if (status != null) expandedY() else collapsedY()
 
     private fun expandedY(): Int = statusBarHeightPx() + dpToPx(8)
 
