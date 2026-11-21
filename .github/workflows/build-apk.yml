@@ -1,4 +1,4 @@
-name: Build Mero Agent APK
+﻿name: Build Mero Agent APK
 
 on:
   push:
@@ -38,10 +38,12 @@ jobs:
       # Optional: set KEYSTORE_FILE to a base64-encoded .jks secret.
       # When absent, Gradle falls back to debug signing for local-only artifacts.
       - name: Decode optional release keystore
-        if: ${{ secrets.KEYSTORE_FILE != '' }}
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_FILE }}
-        run: echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+          fi
 
       - name: Build release APK
         env:
