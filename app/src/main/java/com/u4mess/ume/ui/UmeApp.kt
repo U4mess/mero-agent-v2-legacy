@@ -70,7 +70,6 @@ private val DockTabSelected = Color(0xFF242326)
 @Composable
 fun UmeApp() {
     var tab by rememberSaveable { mutableStateOf(Tab.Chat) }
-    val generating by ChatController.generating.collectAsState()
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val layoutDirection = LocalLayoutDirection.current
 
@@ -92,11 +91,6 @@ fun UmeApp() {
             if (!imeVisible) {
                 FloatingDock(
                     selectedTab = tab,
-                    generating = generating,
-                    onAsk = {
-                        tab = Tab.Chat
-                        ChatFocusRequest.request()
-                    },
                     onSelect = { tab = it },
                 )
             }
@@ -125,70 +119,45 @@ fun UmeApp() {
 @Composable
 private fun FloatingDock(
     selectedTab: Tab,
-    generating: Boolean,
-    onAsk: () -> Unit,
     onSelect: (Tab) -> Unit,
 ) {
-    val shape = RoundedCornerShape(30.dp)
-    val askColor by animateColorAsState(
-        targetValue = if (selectedTab == Tab.Chat) DockAskSelected else Color.Transparent,
-        animationSpec = tween(220),
-        label = "dockAsk",
-    )
+    val shape = RoundedCornerShape(25.dp)
 
     Box(
         Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 16.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(60.dp)
+                .height(50.dp)
                 .shadow(18.dp, shape)
                 .clip(shape)
                 .background(DockBackground)
                 .border(0.75.dp, DockBorder, shape)
-                .padding(8.dp),
+                .padding(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier
-                    .height(44.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(askColor)
-                    .clickable(onClick = onAsk)
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                UmeMonkeyFace(
-                    modifier = Modifier.size(26.dp),
-                    mood = if (generating) MonkeyMood.THINKING else MonkeyMood.IDLE,
-                )
-                Spacer(Modifier.width(7.dp))
-                Text(
-                    text = "Ask",
-                    color = DockText,
-                    fontFamily = UmeSerif,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 16.sp,
-                )
-            }
-
-            Spacer(Modifier.weight(1f))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                listOf(Tab.Memory, Tab.Models, Tab.Settings).forEach { entry ->
-                    DockTab(entry, selectedTab == entry) { onSelect(entry) }
-                }
+            Tab.entries.forEach { entry ->
+                DockTab(
+                    tab = entry,
+                    selected = selectedTab == entry,
+                    modifier = Modifier.weight(1f),
+                ) { onSelect(entry) }
             }
         }
     }
 }
 
 @Composable
-private fun DockTab(tab: Tab, selected: Boolean, onClick: () -> Unit) {
+private fun DockTab(
+    tab: Tab,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     val tint = if (selected) DockText else DockMuted
     val highlight by animateColorAsState(
         targetValue = if (selected) DockTabSelected else Color.Transparent,
@@ -197,12 +166,11 @@ private fun DockTab(tab: Tab, selected: Boolean, onClick: () -> Unit) {
     )
 
     Column(
-        modifier = Modifier
-            .height(44.dp)
-            .clip(RoundedCornerShape(20.dp))
+        modifier = modifier
+            .height(38.dp)
+            .clip(RoundedCornerShape(16.dp))
             .background(highlight)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 9.dp),
+            .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -211,7 +179,7 @@ private fun DockTab(tab: Tab, selected: Boolean, onClick: () -> Unit) {
         Text(
             text = tab.label,
             color = tint,
-            fontSize = 9.sp,
+            fontSize = 10.sp,
             letterSpacing = 0.2.sp,
             maxLines = 1,
         )

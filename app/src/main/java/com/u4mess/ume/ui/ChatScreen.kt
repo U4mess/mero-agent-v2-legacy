@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -30,10 +31,19 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -51,12 +61,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -76,16 +91,19 @@ import com.u4mess.ume.brain.ChatAttachmentStore
 import com.u4mess.ume.brain.ChatController
 import com.u4mess.ume.brain.ChatMode
 import com.u4mess.ume.brain.ChatRole
+import com.u4mess.ume.brain.ChatSession
 import com.u4mess.ume.brain.UiAgentResult
 import com.u4mess.ume.net.WebResult
 import com.u4mess.ume.service.ApprovalRequest
 import com.u4mess.ume.service.IslandAgent
+import com.u4mess.ume.ui.components.MarkdownText
 import com.u4mess.ume.voice.VoiceChatSession
 import com.u4mess.ume.voice.VoiceInputManager
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
@@ -118,17 +136,18 @@ fun ChatScreen() {
     val generating by ChatController.generating.collectAsState()
     val mode by ChatController.mode.collectAsState()
     val webEnabled by ChatController.webEnabled.collectAsState()
-    val agentStatus by IslandAgent.status.collectAsState()
+    val sessions by ChatController.sessions.collectAsState()
+    val currentSessionId by ChatController.currentSessionId.collectAsState()
     val approval by IslandAgent.approval.collectAsState()
     val listening by VoiceInputManager.isListening.collectAsState()
     val partialTranscript by VoiceInputManager.partialTranscript.collectAsState()
     val rmsLevel by VoiceInputManager.rmsLevel.collectAsState()
     val voiceError by VoiceInputManager.errorMessage.collectAsState()
-    val charging = rememberCharging()
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val context = LocalContext.current
     var input by rememberSaveable { mutableStateOf("") }
     var showVoiceChat by rememberSaveable { mutableStateOf(false) }
+    var showHistory by rememberSaveable { mutableStateOf(false) }
     var selectedWebSources by remember { mutableStateOf<List<WebResult>?>(null) }
     var stagedAttachment by remember { mutableStateOf<ChatAttachment?>(null) }
     val scope = rememberCoroutineScope()
@@ -197,21 +216,6 @@ fun ChatScreen() {
         }
     }
 
-    val mood = when {
-        approval != null -> MonkeyMood.ACTING
-        agentStatus?.active == true -> MonkeyMood.ACTING
-        generating -> MonkeyMood.THINKING
-        charging -> MonkeyMood.CHARGING
-        else -> MonkeyMood.IDLE
-    }
-    val moodText = when {
-        approval != null -> "Waiting for your approval"
-        agentStatus?.active == true -> "Working on your phone..."
-        generating -> "Thinking..."
-        charging -> "On the charger"
-        else -> "Idle"
-    }
-
     LaunchedEffect(Unit) {
         ChatFocusRequest.requests.collect { request ->
             if (request > 0) {
@@ -268,13 +272,16 @@ fun ChatScreen() {
             .then(if (imeVisible) Modifier.imePadding() else Modifier),
     ) {
         ChatHeader(
-            mood = mood,
-            subtitle = moodText,
             generating = generating,
             mode = mode,
             webEnabled = webEnabled,
             onModeChange = ChatController::setMode,
             onToggleWeb = { ChatController.setWebEnabled(!webEnabled) },
+            onHistory = { showHistory = true },
+            onNewChat = {
+                ChatController.newChat()
+                ChatFocusRequest.request()
+            },
             onTalk = { showVoiceChat = true },
             onStop = { ChatController.stop() },
         )
@@ -297,7 +304,7 @@ fun ChatScreen() {
                     top = 8.dp,
                     bottom = 16.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(messages, key = { it.id }) { message ->
                     MessageBubble(
@@ -350,139 +357,111 @@ fun ChatScreen() {
     selectedWebSources?.let { sources ->
         WebSourcesSheet(sources) { selectedWebSources = null }
     }
+
+    if (showHistory) {
+        ChatHistorySheet(
+            sessions = sessions,
+            currentSessionId = currentSessionId,
+            messageCount = ChatController::messageCount,
+            onSelect = { session ->
+                ChatController.switchSession(session.id)
+                showHistory = false
+            },
+            onDelete = ChatController::deleteSession,
+            onDismiss = { showHistory = false },
+        )
+    }
 }
 
 @Composable
 private fun ChatHeader(
-    mood: MonkeyMood,
-    subtitle: String,
     generating: Boolean,
     mode: ChatMode,
     webEnabled: Boolean,
     onModeChange: (ChatMode) -> Unit,
     onToggleWeb: () -> Unit,
+    onHistory: () -> Unit,
+    onNewChat: () -> Unit,
     onTalk: () -> Unit,
     onStop: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
+    var modeMenu by remember { mutableStateOf(false) }
     val hapticTap = {
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     }
-    val statusColor = when (mood) {
-        MonkeyMood.THINKING, MonkeyMood.ACTING -> Accent
-        MonkeyMood.CHARGING -> Color(0xFFE0A458)
-        else -> TextSecondary
-    }
+    val webBackground by animateColorAsState(
+        targetValue = if (webEnabled) Accent else Elevated,
+        animationSpec = tween(180),
+        label = "webBackground",
+    )
+    val webText by animateColorAsState(
+        targetValue = if (webEnabled) OnAccent else TextSecondary,
+        animationSpec = tween(180),
+        label = "webText",
+    )
 
-    Column(
-        Modifier
+    Row(
+        modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 6.dp),
+            .height(44.dp)
+            .padding(horizontal = 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            UmeMonkeyFace(Modifier.size(32.dp), mood = mood)
-            Spacer(Modifier.width(8.dp))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box {
+                Row(
+                    modifier = Modifier
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Elevated)
+                        .border(0.75.dp, Border, RoundedCornerShape(16.dp))
+                        .clickable {
+                            hapticTap()
+                            modeMenu = true
+                        }
+                        .padding(start = 7.dp, end = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    UmeMonkeyFace(Modifier.size(20.dp), mood = MonkeyMood.IDLE)
+                    Spacer(Modifier.width(5.dp))
                     Text(
-                        text = "Ume",
+                        text = "${mode.label} \u25BE",
                         color = TextPrimary,
-                        fontFamily = UmeSerif,
-                        fontSize = 21.sp,
-                    )
-                    Spacer(Modifier.width(7.dp))
-                    Box(
-                        Modifier
-                            .size(5.dp)
-                            .clip(CircleShape)
-                            .background(statusColor),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = subtitle,
-                        color = TextSecondary,
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
                     )
                 }
-            }
-            TalkModeButton(onClick = { hapticTap(); onTalk() })
-            if (generating) {
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text = "Stop",
-                    color = TextPrimary,
-                    fontSize = 11.sp,
-                    modifier = Modifier
-                        .height(32.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Elevated)
-                        .border(0.75.dp, Border, RoundedCornerShape(12.dp))
-                        .clickable(onClick = onStop)
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                )
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Row(
-                modifier = Modifier
-                    .height(36.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Elevated)
-                    .border(0.75.dp, Border, RoundedCornerShape(14.dp))
-                    .padding(2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ChatMode.entries.forEach { option ->
-                    val selected = mode == option
-                    val optionBackground by animateColorAsState(
-                        targetValue = if (selected) TextPrimary else Color.Transparent,
-                        animationSpec = tween(180),
-                        label = "modeBackground",
-                    )
-                    val optionText by animateColorAsState(
-                        targetValue = if (selected) Black else TextSecondary,
-                        animationSpec = tween(180),
-                        label = "modeText",
-                    )
-                    Box(
-                        modifier = Modifier
-                            .height(32.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(optionBackground)
-                            .clickable {
+                DropdownMenu(
+                    expanded = modeMenu,
+                    onDismissRequest = { modeMenu = false },
+                ) {
+                    ChatMode.entries.forEach { option ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = option.label,
+                                    color = if (option == mode) Accent else TextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (option == mode) FontWeight.Medium else FontWeight.Normal,
+                                )
+                            },
+                            onClick = {
                                 hapticTap()
                                 onModeChange(option)
-                            }
-                            .padding(horizontal = 9.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = option.label,
-                            color = optionText,
-                            fontSize = 10.sp,
-                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                                modeMenu = false
+                            },
                         )
                     }
                 }
             }
-            Spacer(Modifier.width(8.dp))
-            val webBackground by animateColorAsState(
-                targetValue = if (webEnabled) Accent else Elevated,
-                animationSpec = tween(180),
-                label = "webBackground",
-            )
-            val webText by animateColorAsState(
-                targetValue = if (webEnabled) OnAccent else TextSecondary,
-                animationSpec = tween(180),
-                label = "webText",
-            )
             Box(
                 modifier = Modifier
-                    .height(36.dp)
+                    .height(32.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(webBackground)
                     .border(0.75.dp, if (webEnabled) Accent else Border, RoundedCornerShape(14.dp))
@@ -490,7 +469,7 @@ private fun ChatHeader(
                         hapticTap()
                         onToggleWeb()
                     }
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = 9.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -501,8 +480,213 @@ private fun ChatHeader(
                 )
             }
         }
+
+        Spacer(Modifier.weight(1f))
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            HeaderIconButton(HeaderIcon.History) {
+                hapticTap()
+                onHistory()
+            }
+            if (generating) {
+                HeaderIconButton(HeaderIcon.Stop) {
+                    hapticTap()
+                    onStop()
+                }
+            } else {
+                HeaderIconButton(HeaderIcon.NewChat) {
+                    hapticTap()
+                    onNewChat()
+                }
+            }
+            TalkModeButton(onClick = { hapticTap(); onTalk() })
+        }
     }
 }
+
+private enum class HeaderIcon { History, NewChat, Stop }
+
+@Composable
+private fun HeaderIconButton(icon: HeaderIcon, onClick: () -> Unit) {
+    val tint = TextSecondary
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .semantics {
+                contentDescription = when (icon) {
+                    HeaderIcon.History -> "Chat history"
+                    HeaderIcon.NewChat -> "New chat"
+                    HeaderIcon.Stop -> "Stop generating"
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(15.dp)) {
+            val stroke = 1.3.dp.toPx()
+            if (icon == HeaderIcon.History) {
+                drawCircle(
+                    color = tint,
+                    radius = size.minDimension * 0.36f,
+                    style = Stroke(stroke),
+                )
+                drawLine(
+                    color = tint,
+                    start = Offset(size.width / 2f, size.height * 0.2f),
+                    end = Offset(size.width / 2f, size.height / 2f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = tint,
+                    start = Offset(size.width / 2f, size.height / 2f),
+                    end = Offset(size.width * 0.72f, size.height * 0.62f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+            } else if (icon == HeaderIcon.NewChat) {
+                drawLine(
+                    color = tint,
+                    start = Offset(size.width / 2f, size.height * 0.14f),
+                    end = Offset(size.width / 2f, size.height * 0.86f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = tint,
+                    start = Offset(size.width * 0.14f, size.height / 2f),
+                    end = Offset(size.width * 0.86f, size.height / 2f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+            } else {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(size.width * 0.26f, size.height * 0.26f),
+                    size = Size(size.width * 0.48f, size.height * 0.48f),
+                    cornerRadius = CornerRadius(1.5.dp.toPx()),
+                    style = Stroke(stroke),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatHistorySheet(
+    sessions: List<ChatSession>,
+    currentSessionId: String,
+    messageCount: (String) -> Int,
+    onSelect: (ChatSession) -> Unit,
+    onDelete: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Elevated,
+        contentColor = TextPrimary,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        dragHandle = { BottomSheetDefaults.DragHandle(color = Border) },
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+        ) {
+            Text("Chat history", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(10.dp))
+            Column(
+                Modifier
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                if (sessions.isEmpty()) {
+                    Text("No chats yet", color = TextSecondary, fontSize = 13.sp)
+                }
+                sessions.forEachIndexed { index, session ->
+                    val count = messageCount(session.id)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (session.id == currentSessionId) {
+                                    Accent.copy(alpha = 0.10f)
+                                } else {
+                                    Color.Transparent
+                                },
+                            )
+                            .border(
+                                0.75.dp,
+                                if (session.id == currentSessionId) Accent.copy(alpha = 0.45f) else Color.Transparent,
+                                RoundedCornerShape(12.dp),
+                            )
+                            .clickable { onSelect(session) }
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (session.id == currentSessionId) {
+                            Box(
+                                Modifier
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(Accent),
+                            )
+                            Spacer(Modifier.width(7.dp))
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = session.title,
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = "$count ${if (count == 1) "message" else "messages"} \u00B7 " +
+                                    formatHistoryTime(session.updatedAt),
+                                color = TextSecondary,
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                            )
+                        }
+                        Text(
+                            text = "\u00D7",
+                            color = TextSecondary,
+                            fontSize = 15.sp,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { onDelete(session.id) }
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                                .semantics { contentDescription = "Delete chat" },
+                        )
+                    }
+                    if (index != sessions.lastIndex) {
+                        HorizontalDivider(
+                            color = Border.copy(alpha = 0.7f),
+                            thickness = 0.75.dp,
+                            modifier = Modifier.padding(horizontal = 4.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private val HISTORY_TIME_FORMATTER = DateTimeFormatter.ofPattern("MMM d, HH:mm")
+
+private fun formatHistoryTime(timestamp: Long): String =
+    HISTORY_TIME_FORMATTER.format(Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()))
 
 @Composable
 private fun TalkModeButton(onClick: () -> Unit) {
@@ -576,7 +760,7 @@ private fun MessageBubble(
                     .wrapContentWidth(Alignment.End)
                     .clip(UserShape)
                     .background(bubbleColor)
-                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
             ) {
                 message.attachment?.let { attachment ->
                     AttachmentInlinePill(attachment)
@@ -608,24 +792,17 @@ private fun MessageBubble(
             else -> null
         }
 
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            UmeMonkeyFace(
-                Modifier.size(28.dp),
-                mood = MonkeyMood.IDLE,
-            )
-            Spacer(Modifier.width(8.dp))
-            Column(
-                Modifier.then(
+        Column(
+            Modifier
+                .fillMaxWidth(0.92f)
+                .then(
                     if (message.agent != null) {
                         Modifier.clickable { agentExpanded = !agentExpanded }
                     } else {
                         Modifier
                     },
                 ),
-            ) {
+        ) {
                 if (badge != null) {
                     Text(
                         text = badge,
@@ -638,8 +815,7 @@ private fun MessageBubble(
                 }
                 Column(
                     modifier = Modifier
-                        .widthIn(max = 280.dp)
-                        .wrapContentWidth(Alignment.Start)
+                        .fillMaxWidth()
                         .then(if (dark) Modifier else Modifier.shadow(1.dp, UmeShape))
                         .clip(UmeShape)
                         .background(bubbleColor)
@@ -648,7 +824,7 @@ private fun MessageBubble(
                             if (message.proactive) WarmAccent else bubbleBorder,
                             UmeShape,
                         )
-                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
                 ) {
                     if (message.agent != null) {
                         AgentStatusCard(message.agent, expanded = agentExpanded)
@@ -656,12 +832,18 @@ private fun MessageBubble(
                             WebSourcesBadge(message.webSources, onOpenWebSources)
                         }
                         Spacer(Modifier.height(2.dp))
-                        Text(
-                            text = formatChatTime(message.createdAt),
-                            color = TextSecondary.copy(alpha = 0.6f),
-                            fontSize = 10.sp,
+                        Row(
                             modifier = Modifier.align(Alignment.End),
-                        )
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = formatChatTime(message.createdAt),
+                                color = TextSecondary.copy(alpha = 0.6f),
+                                fontSize = 10.sp,
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            CopyReplyButton(message.text)
+                        }
                     } else {
                         val content = when {
                             message.text.isBlank() && message.streaming -> "Thinking..."
@@ -673,26 +855,95 @@ private fun MessageBubble(
                             Spacer(Modifier.height(4.dp))
                         }
                         Row(verticalAlignment = Alignment.Bottom) {
-                            Text(
-                                text = content,
-                                color = if (message.text.isBlank() && message.streaming) {
-                                    TextSecondary
-                                } else {
-                                    TextPrimary
-                                },
-                                fontSize = 14.sp,
-                                lineHeight = 21.sp,
-                                modifier = Modifier.weight(1f, fill = false),
-                            )
+                            if (message.text.isBlank() && message.streaming) {
+                                Text(
+                                    text = content,
+                                    color = TextSecondary,
+                                    fontSize = 14.sp,
+                                    lineHeight = 21.sp,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                            } else {
+                                MarkdownText(
+                                    markdown = content,
+                                    color = TextPrimary,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                            }
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 text = formatChatTime(message.createdAt),
                                 color = TextSecondary.copy(alpha = 0.6f),
                                 fontSize = 10.sp,
                             )
+                            Spacer(Modifier.width(5.dp))
+                            CopyReplyButton(message.text)
                         }
                     }
                 }
+            }
+        }
+    }
+
+@Composable
+private fun CopyReplyButton(rawText: String) {
+    val clipboard = LocalClipboardManager.current
+    val haptic = LocalHapticFeedback.current
+    val accent = Accent
+    val secondary = TextSecondary
+    var copied by remember(rawText) { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1_500)
+            copied = false
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .clip(CircleShape)
+            .clickable {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                clipboard.setText(AnnotatedString(rawText))
+                copied = true
+            }
+            .semantics { contentDescription = if (copied) "Copied" else "Copy reply" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(12.dp)) {
+            val stroke = 1.2.dp.toPx()
+            if (copied) {
+                drawLine(
+                    color = accent,
+                    start = Offset(size.width * 0.15f, size.height * 0.55f),
+                    end = Offset(size.width * 0.42f, size.height * 0.8f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = accent,
+                    start = Offset(size.width * 0.42f, size.height * 0.8f),
+                    end = Offset(size.width * 0.86f, size.height * 0.22f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+            } else {
+                drawRoundRect(
+                    color = secondary,
+                    topLeft = Offset(size.width * 0.12f, size.height * 0.28f),
+                    size = Size(size.width * 0.62f, size.height * 0.62f),
+                    cornerRadius = CornerRadius(1.5.dp.toPx()),
+                    style = Stroke(stroke),
+                )
+                drawRoundRect(
+                    color = secondary,
+                    topLeft = Offset(size.width * 0.28f, size.height * 0.1f),
+                    size = Size(size.width * 0.62f, size.height * 0.62f),
+                    cornerRadius = CornerRadius(1.5.dp.toPx()),
+                    style = Stroke(stroke),
+                )
             }
         }
     }
@@ -1036,7 +1287,7 @@ private fun ChatInput(
                 start = 20.dp,
                 end = 20.dp,
                 top = 8.dp,
-                bottom = if (imeVisible) 8.dp else 12.dp,
+                bottom = 6.dp,
             ),
         verticalAlignment = Alignment.CenterVertically,
     ) {

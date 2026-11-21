@@ -495,7 +495,7 @@ fun SettingsScreen() {
                     .padding(start = 20.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
                     Text("Auto-index Screenshots & PDFs", color = TextPrimary, fontSize = 15.sp)
                     Text(
                         text = when {
@@ -533,7 +533,7 @@ fun SettingsScreen() {
                 }
             }
 
-            HorizontalDivider(color = Border, thickness = 1.dp)
+            RowDivider()
 
             Row(
                 modifier = Modifier
@@ -541,7 +541,7 @@ fun SettingsScreen() {
                     .padding(start = 20.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
                     Text("Dynamic Island", color = TextPrimary, fontSize = 15.sp)
                     Text(
                         text = when {
@@ -575,7 +575,7 @@ fun SettingsScreen() {
                 )
             }
 
-            HorizontalDivider(color = Border, thickness = 1.dp)
+            RowDivider()
 
             Column(
                 modifier = Modifier
@@ -692,7 +692,7 @@ fun SettingsScreen() {
                     .padding(start = 20.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
                     Text("Voice replies (TTS)", color = TextPrimary, fontSize = 15.sp)
                     Text(
                         text = if (voiceReplies) "Ume reads replies aloud" else "Off",
@@ -796,18 +796,20 @@ fun SettingsScreen() {
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = "Save",
-                    color = if (braveKey.isNotBlank()) TextPrimary else TextSecondary,
+                    color = Black,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(TextPrimary)
                         .clickable(enabled = braveKey.isNotBlank()) {
                             WebSearchSettings.saveApiKey(braveKey)
                             braveSaved = WebSearchSettings.hasKey()
                         }
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
                 )
                 if (braveSaved) {
+                    Spacer(Modifier.width(4.dp))
                     Text(
                         text = "Clear",
                         color = TextSecondary,
@@ -1040,7 +1042,7 @@ fun SettingsScreen() {
                     .padding(start = 20.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
                     Text("Hybrid Cloud Actions", color = TextPrimary, fontSize = 15.sp)
                     Text(
                         text = if (cloudEnabled) {
@@ -1753,7 +1755,7 @@ private fun RowDivider() {
     HorizontalDivider(
         color = Border,
         thickness = 1.dp,
-        modifier = Modifier.padding(start = 38.dp, end = 20.dp),
+        modifier = Modifier.padding(horizontal = 20.dp),
     )
 }
 

@@ -40,13 +40,12 @@
 > Task :app:kaptDebugKotlin UP-TO-DATE
 
 > Task :app:compileDebugKotlin
-w: file:///C:/Projects/ume-agent/app/src/main/java/com/u4mess/ume/MainActivity.kt:38:60 'static field SOFT_INPUT_ADJUST_RESIZE: Int' is deprecated. Deprecated in Java.
-w: file:///C:/Projects/ume-agent/app/src/main/java/com/u4mess/ume/MainActivity.kt:38:60 'static field SOFT_INPUT_ADJUST_RESIZE: Int' is deprecated. Deprecated in Java.
+w: file:///C:/Projects/ume-agent/app/src/main/java/com/u4mess/ume/ui/ChatScreen.kt:890:21 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
 
 > Task :app:compileDebugJavaWithJavac UP-TO-DATE
-> Task :app:processDebugJavaRes
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:mergeDebugJavaResource UP-TO-DATE
 > Task :app:transformDebugClassesWithAsm
-> Task :app:mergeDebugJavaResource
 > Task :app:dexBuilderDebug
 > Task :app:mergeDebugGlobalSynthetics UP-TO-DATE
 > Task :app:mergeProjectDexDebug
@@ -54,5 +53,5 @@ w: file:///C:/Projects/ume-agent/app/src/main/java/com/u4mess/ume/MainActivity.k
 > Task :app:createDebugApkListingFileRedirect UP-TO-DATE
 > Task :app:assembleDebug
 
-BUILD SUCCESSFUL in 5s
-44 actionable tasks: 10 executed, 34 up-to-date
+BUILD SUCCESSFUL in 3s
+44 actionable tasks: 8 executed, 36 up-to-date

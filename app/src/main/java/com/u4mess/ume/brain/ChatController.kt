@@ -13,6 +13,7 @@ import com.u4mess.ume.settings.CloudSettings
 import com.u4mess.ume.settings.WebSearchSettings
 import com.u4mess.ume.voice.VoiceChatSession
 import com.u4mess.ume.voice.VoiceOutputManager
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +46,7 @@ object ChatController {
         val agent: UiAgentResult? = null,
         val webSources: List<WebResult> = emptyList(),
         val attachment: ChatAttachment? = null,
+        val sessionId: String = "",
     )
 
     private data class IncomingPrompt(
@@ -57,6 +59,14 @@ object ChatController {
 
     private val _generating = MutableStateFlow(false)
     val generating: StateFlow<Boolean> = _generating.asStateFlow()
+
+    private val _sessions = MutableStateFlow<List<ChatSession>>(emptyList())
+    val sessions: StateFlow<List<ChatSession>> = _sessions.asStateFlow()
+
+    private val _currentSessionId = MutableStateFlow("")
+    val currentSessionId: StateFlow<String> = _currentSessionId.asStateFlow()
+
+    private val sessionMessages = mutableMapOf<String, List<Message>>()
 
     val mode = MutableStateFlow(ChatMode.AUTO)
     val webEnabled = MutableStateFlow(false)
@@ -75,19 +85,25 @@ object ChatController {
         appContext = context.applicationContext
         this.repository = repository
         started = true
+        initializeSessions()
 
         IslandAgent.setStopHandler { stop() }
 
         scope.launch {
             for (incoming in pending) {
+                val sessionId = _currentSessionId.value
+                val firstUserMessage = _messages.value.none { it.role == ChatRole.USER }
                 _messages.update {
                     it + Message(
                         nextId++,
                         ChatRole.USER,
                         incoming.text,
                         attachment = incoming.attachment,
+                        sessionId = sessionId,
                     )
                 }
+                if (firstUserMessage) autoTitle(incoming.text)
+                persistCurrent()
                 generate(incoming.text, incoming.attachment)
             }
         }
@@ -118,6 +134,60 @@ object ChatController {
         webEnabled.value = value
     }
 
+    fun newChat() {
+        persistCurrent()
+        val session = ChatSession(
+            id = UUID.randomUUID().toString(),
+            title = "New chat",
+            updatedAt = System.currentTimeMillis(),
+        )
+        _sessions.update { list -> (list + session).sortedByDescending { it.updatedAt } }
+        _currentSessionId.value = session.id
+        _messages.value = emptyList()
+        ChatSessionStore.save(_sessions.value, session.id, sessionMessages)
+    }
+
+    fun switchSession(id: String) {
+        if (id.isBlank() || id == _currentSessionId.value) return
+        if (_sessions.value.none { it.id == id }) return
+        persistCurrent()
+        _currentSessionId.value = id
+        _messages.value = sessionMessages[id].orEmpty()
+        ChatSessionStore.save(_sessions.value, id, sessionMessages)
+    }
+
+    fun deleteSession(id: String) {
+        if (_sessions.value.none { it.id == id }) return
+        persistCurrent()
+        sessionMessages.remove(id)
+        val remaining = _sessions.value.filterNot { it.id == id }
+        if (remaining.isEmpty()) {
+            val session = ChatSession(
+                id = UUID.randomUUID().toString(),
+                title = "New chat",
+                updatedAt = System.currentTimeMillis(),
+            )
+            _sessions.value = listOf(session)
+            _currentSessionId.value = session.id
+            _messages.value = emptyList()
+        } else {
+            _sessions.value = remaining
+            if (_currentSessionId.value == id) {
+                val next = remaining.maxByOrNull { it.updatedAt } ?: remaining.first()
+                _currentSessionId.value = next.id
+                _messages.value = sessionMessages[next.id].orEmpty()
+            }
+        }
+        ChatSessionStore.save(_sessions.value, _currentSessionId.value, sessionMessages)
+    }
+
+    fun messageCount(sessionId: String): Int =
+        if (sessionId == _currentSessionId.value) {
+            _messages.value.size
+        } else {
+            sessionMessages[sessionId].orEmpty().size
+        }
+
     fun postProactiveSummary(text: String) {
         val summary = text.trim()
         if (summary.isEmpty()) return
@@ -128,8 +198,10 @@ object ChatController {
                 role = ChatRole.ASSISTANT,
                 text = summary,
                 proactive = true,
+                sessionId = _currentSessionId.value,
             )
         }
+        persistCurrent()
     }
 
     fun stop() {
@@ -144,7 +216,15 @@ object ChatController {
     private suspend fun generate(prompt: String, attachment: ChatAttachment? = null) {
         _generating.value = true
         val assistantId = nextId++
-        _messages.update { it + Message(assistantId, ChatRole.ASSISTANT, "", streaming = true) }
+        _messages.update {
+            it + Message(
+                assistantId,
+                ChatRole.ASSISTANT,
+                "",
+                streaming = true,
+                sessionId = _currentSessionId.value,
+            )
+        }
 
         try {
             val raw = prompt.trim()
@@ -212,6 +292,7 @@ object ChatController {
             _messages.update { list ->
                 list.map { if (it.id == assistantId) it.copy(streaming = false) else it }
             }
+            persistCurrent()
             _generating.value = false
         }
     }
@@ -535,6 +616,59 @@ object ChatController {
         _messages.update { list ->
             list.map { if (it.id == id) it.copy(agent = result) else it }
         }
+    }
+
+    private fun initializeSessions() {
+        ChatSessionStore.init(appContext)
+        val stored = ChatSessionStore.load()
+        if (stored.sessions.isEmpty()) {
+            val session = ChatSession(
+                id = UUID.randomUUID().toString(),
+                title = "New chat",
+                updatedAt = System.currentTimeMillis(),
+            )
+            _sessions.value = listOf(session)
+            _currentSessionId.value = session.id
+            if (_messages.value.isNotEmpty()) {
+                sessionMessages[session.id] = _messages.value
+            }
+        } else {
+            _sessions.value = stored.sessions.sortedByDescending { it.updatedAt }
+            val current = stored.currentSessionId
+                ?.takeIf { id -> stored.sessions.any { it.id == id } }
+                ?: stored.sessions.maxByOrNull { it.updatedAt }!!.id
+            _currentSessionId.value = current
+            sessionMessages.putAll(stored.messages)
+            _messages.value = sessionMessages[current].orEmpty()
+        }
+        nextId = (
+            sessionMessages.values.flatten().maxOfOrNull { it.id }
+                ?: _messages.value.maxOfOrNull { it.id }
+                ?: -1L
+            ) + 1
+        persistCurrent()
+    }
+
+    private fun autoTitle(text: String) {
+        val current = _sessions.value.firstOrNull { it.id == _currentSessionId.value } ?: return
+        if (current.title != "New chat") return
+        val title = text.trim().replace('\n', ' ').take(36).ifBlank { "New chat" }
+        _sessions.update { list ->
+            list.map { if (it.id == current.id) it.copy(title = title) else it }
+                .sortedByDescending { it.updatedAt }
+        }
+    }
+
+    private fun persistCurrent() {
+        val current = _currentSessionId.value
+        if (current.isBlank()) return
+        sessionMessages[current] = _messages.value
+        _sessions.update { list ->
+            list.map {
+                if (it.id == current) it.copy(updatedAt = System.currentTimeMillis()) else it
+            }.sortedByDescending { it.updatedAt }
+        }
+        ChatSessionStore.save(_sessions.value, current, sessionMessages)
     }
 
     private fun setWebSources(id: Long, sources: List<WebResult>) {
