@@ -47,7 +47,7 @@
 ## Building from Source
 
 ### Prerequisites
-- JDK 17
+- JDK 21
 - Android SDK (Compile SDK 36, Target SDK 35, Min SDK 29)
 - Android NDK `27.2.12479018` & CMake `3.22.1`
 

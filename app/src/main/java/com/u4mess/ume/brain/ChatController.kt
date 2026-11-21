@@ -211,7 +211,7 @@ object ChatController {
             agent.cancel()
             return
         }
-        LocalLlmEngine.stopGeneration()
+        ModelManager.stopChat()
     }
 
     private suspend fun generate(prompt: String, attachment: ChatAttachment? = null) {
@@ -267,7 +267,7 @@ object ChatController {
                     generateLocal(cleaned, assistantId, webBlock, attachmentBlock)
                 }
 
-                LocalLlmEngine.chatStatus.value is ModelStatus.Ready -> {
+                ModelManager.chatStatus.value is ModelStatus.Ready -> {
                     generateLocal(cleaned, assistantId, webBlock, attachmentBlock)
                 }
 
@@ -304,10 +304,10 @@ object ChatController {
         webBlock: String? = null,
         attachmentBlock: String? = null,
     ) {
-        if (LocalLlmEngine.chatStatus.value !is ModelStatus.Ready) {
+        if (ModelManager.chatStatus.value !is ModelStatus.Ready) {
             replace(
                 assistantId,
-                "No chat model loaded. Open Models, choose a .gguf file and tap Load.",
+                "No chat model loaded. Open Models, choose a .gguf or .litertlm file and tap Load.",
             )
             return
         }
@@ -322,9 +322,8 @@ object ChatController {
             .takeLast(8)
             .map { ChatTurn(it.role, it.text) }
 
-        val formatted = LocalLlmEngine.formatPrompt(system, turns)
         val speech = if (shouldSpeak()) SentenceSpeechBuffer() else null
-        LocalLlmEngine.generate(formatted).collect { piece ->
+        ModelManager.generateChat(system, turns).collect { piece ->
             append(assistantId, piece)
             speech?.append(piece)
         }

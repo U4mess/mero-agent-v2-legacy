@@ -150,9 +150,12 @@ object LocalLlmEngine {
             embeddingStatus.value = if (loaded) {
                 ModelStatus.Ready
             } else {
-                ModelStatus.Error(
-                    result.exceptionOrNull()?.message ?: "Embedding model must be 384-dimensional",
-                )
+                val detail = result.exceptionOrNull()?.message
+                    ?: runCatching { NativeLlama.nativeEmbeddingError(engineHandle()) }
+                        .getOrNull()
+                        ?.takeIf { it.isNotBlank() }
+                    ?: "Failed to load embedding model"
+                ModelStatus.Error(detail)
             }
             loaded
         }

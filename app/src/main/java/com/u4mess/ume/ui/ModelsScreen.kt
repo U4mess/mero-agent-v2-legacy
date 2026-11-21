@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.u4mess.ume.brain.ChatBackend
 import com.u4mess.ume.brain.LocalLlmEngine
 import com.u4mess.ume.brain.ModelManager
 import com.u4mess.ume.brain.ModelRole
@@ -49,12 +50,13 @@ fun ModelsScreen() {
     val scope = rememberCoroutineScope()
     val chatSelection by ModelManager.chatSelection.collectAsState()
     val embeddingSelection by ModelManager.embeddingSelection.collectAsState()
-    val chatStatus by LocalLlmEngine.chatStatus.collectAsState()
+    val chatStatus by ModelManager.chatStatus.collectAsState()
+    val chatBackend by ModelManager.chatBackend.collectAsState()
     val embeddingStatus by LocalLlmEngine.embeddingStatus.collectAsState()
 
     val chatPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null && !ModelManager.select(context, ModelRole.CHAT, uri)) {
-            Toast.makeText(context, "Pick a .gguf file", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Pick a .gguf or .litertlm file", Toast.LENGTH_SHORT).show()
         }
     }
     val embeddingPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -72,9 +74,10 @@ fun ModelsScreen() {
 
         ModelCard(
             title = "Chat model",
-            hint = "Qwen, Llama 3 or Gemma .gguf",
+            hint = "Qwen, Llama 3 or Gemma (.gguf / .litertlm)",
             selection = chatSelection,
             status = chatStatus,
+            backend = chatBackend,
             onChoose = { chatPicker.launch(arrayOf("*/*")) },
             onLoad = {
                 scope.launch {
@@ -83,7 +86,7 @@ fun ModelsScreen() {
                     }
                 }
             },
-            onUnload = { scope.launch { LocalLlmEngine.unloadChat() } },
+            onUnload = { scope.launch { ModelManager.unloadChat() } },
         )
 
         Spacer(Modifier.height(12.dp))
@@ -114,6 +117,7 @@ private fun ModelCard(
     hint: String,
     selection: ModelManager.Selection?,
     status: ModelStatus,
+    backend: ChatBackend? = null,
     onChoose: () -> Unit,
     onLoad: () -> Unit,
     onUnload: () -> Unit,
@@ -136,7 +140,11 @@ private fun ModelCard(
             )
             StatusDot(status)
             Spacer(Modifier.width(6.dp))
-            Text(statusLabel(status), color = TextSecondary, fontSize = 11.sp)
+            Text(
+                text = statusLabel(status, backend),
+                color = TextSecondary,
+                fontSize = 11.sp,
+            )
         }
 
         Spacer(Modifier.height(10.dp))
@@ -223,10 +231,10 @@ private fun PillButton(label: String, filled: Boolean, enabled: Boolean, onClick
     )
 }
 
-private fun statusLabel(status: ModelStatus): String = when (status) {
+private fun statusLabel(status: ModelStatus, backend: ChatBackend? = null): String = when (status) {
     ModelStatus.Unloaded -> "Unloaded"
     ModelStatus.Loading -> "Loading..."
-    ModelStatus.Ready -> "Ready"
+    ModelStatus.Ready -> backend?.let { "Loaded \u00B7 ${it.label}" } ?: "Loaded"
     is ModelStatus.Error -> "Error"
 }
 

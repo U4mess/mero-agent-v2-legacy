@@ -32,6 +32,7 @@ struct Engine {
     llama_model *emb_model = nullptr;
     llama_context *emb_ctx = nullptr;
     const llama_vocab *emb_vocab = nullptr;
+    std::string emb_error;
 
     std::mutex chat_mutex;
     std::mutex emb_mutex;
@@ -144,6 +145,7 @@ void unload_embedding(Engine *engine) {
         engine->emb_model = nullptr;
     }
     engine->emb_vocab = nullptr;
+    engine->emb_error.clear();
 }
 
 }  // namespace
@@ -355,13 +357,15 @@ Java_com_u4mess_ume_brain_NativeLlama_nativeLoadEmbedding(JNIEnv *env, jobject, 
 
     llama_model *model = llama_model_load_from_file(model_path.c_str(), model_params);
     if (model == nullptr) {
-        LOGE("Failed to load embedding model: %s", model_path.c_str());
+        engine->emb_error = "Failed to load embedding model from " + model_path;
+        LOGE("%s", engine->emb_error.c_str());
         return JNI_FALSE;
     }
 
     const int dimensions = llama_model_n_embd(model);
     if (dimensions != EMBEDDING_DIMENSIONS) {
-        LOGE("Embedding model has %d dimensions, expected %d", dimensions, EMBEDDING_DIMENSIONS);
+        engine->emb_error = "Expected 384-d embedding, got " + std::to_string(dimensions);
+        LOGE("%s", engine->emb_error.c_str());
         llama_model_free(model);
         return JNI_FALSE;
     }
@@ -373,15 +377,17 @@ Java_com_u4mess_ume_brain_NativeLlama_nativeLoadEmbedding(JNIEnv *env, jobject, 
     context_params.n_threads = threads;
     context_params.n_threads_batch = threads;
     context_params.embeddings = true;
-    context_params.pooling_type = LLAMA_POOLING_TYPE_MEAN;
+    context_params.pooling_type = LLAMA_POOLING_TYPE_CLS;
 
     llama_context *ctx = llama_init_from_model(model, context_params);
     if (ctx == nullptr) {
-        LOGE("Failed to create embedding context");
+        engine->emb_error = "Failed to create embedding context";
+        LOGE("%s", engine->emb_error.c_str());
         llama_model_free(model);
         return JNI_FALSE;
     }
 
+    engine->emb_error.clear();
     engine->emb_model = model;
     engine->emb_ctx = ctx;
     engine->emb_vocab = llama_model_get_vocab(model);
@@ -440,6 +446,15 @@ Java_com_u4mess_ume_brain_NativeLlama_nativeEmbed(JNIEnv *env, jobject, jlong ha
     jfloatArray result = env->NewFloatArray(EMBEDDING_DIMENSIONS);
     if (result != nullptr) {
         env->SetFloatArrayRegion(result, 0, EMBEDDING_DIMENSIONS, embedding.data());
+        LOGI("Embedding generated (%d dims)", EMBEDDING_DIMENSIONS);
     }
     return result;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_u4mess_ume_brain_NativeLlama_nativeEmbeddingError(JNIEnv *env, jobject, jlong handle) {
+    Engine *engine = engine_from(handle);
+    if (engine == nullptr) return env->NewStringUTF("Embedding engine is not available");
+    std::lock_guard<std::mutex> lock(engine->emb_mutex);
+    return env->NewStringUTF(engine->emb_error.c_str());
 }

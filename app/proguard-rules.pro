@@ -56,6 +56,10 @@
 -dontwarn com.google.android.gms.**
 
 # OkHttp (consumer rules normally cover this; keep release builds tolerant).
+# LiteRT-LM SDK (JNI and reflection-based configuration).
+-keep class com.google.ai.edge.litertlm.** { *; }
+-dontwarn com.google.ai.edge.litertlm.**
+
 -dontwarn okhttp3.**
 -dontwarn okio.**
 -dontwarn org.conscrypt.**

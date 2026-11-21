@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.u4mess.ume.UmeApplication
+import com.u4mess.ume.brain.ChatBackend
 import com.u4mess.ume.brain.ChatController
 import com.u4mess.ume.brain.ChatRole
 import com.u4mess.ume.brain.ChatTurn
@@ -20,6 +21,7 @@ class NightlyConsolidator(
 
     override suspend fun doWork(): Result {
         val app = applicationContext as? UmeApplication ?: return Result.success()
+        if (ModelManager.chatBackend.value == ChatBackend.LITERT_LM) return Result.success()
         val repository = app.memoryRepository
         val since = System.currentTimeMillis() - DAY_MILLIS
 

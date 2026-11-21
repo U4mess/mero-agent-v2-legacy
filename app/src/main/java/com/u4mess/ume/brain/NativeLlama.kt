@@ -21,6 +21,8 @@ internal object NativeLlama {
 
     external fun nativeLoadEmbedding(handle: Long, path: String, threads: Int): Boolean
 
+    external fun nativeEmbeddingError(handle: Long): String
+
     external fun nativeUnloadEmbedding(handle: Long)
 
     external fun nativeEmbed(handle: Long, text: String): FloatArray?

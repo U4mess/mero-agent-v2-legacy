@@ -6,11 +6,19 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.content.SharedPreferences
 import java.io.Closeable
+import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 
 enum class ModelRole { CHAT, EMBEDDING }
+
+enum class ChatBackend(val label: String) {
+    LLAMA_CPP("llama.cpp"),
+    LITERT_LM("LiteRT-LM"),
+}
 
 object ModelManager {
 
@@ -26,6 +34,8 @@ object ModelManager {
 
     val chatSelection = MutableStateFlow<Selection?>(null)
     val embeddingSelection = MutableStateFlow<Selection?>(null)
+    val chatStatus = MutableStateFlow<ModelStatus>(ModelStatus.Unloaded)
+    val chatBackend = MutableStateFlow<ChatBackend?>(null)
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -41,7 +51,7 @@ object ModelManager {
     }
 
     fun select(context: Context, role: ModelRole, uri: Uri): Boolean {
-        val selection = describe(context, uri) ?: return false
+        val selection = describe(context, uri, role) ?: return false
         runCatching {
             context.contentResolver.takePersistableUriPermission(
                 uri,
@@ -64,24 +74,140 @@ object ModelManager {
 
     suspend fun loadChat(): Boolean = withContext(Dispatchers.IO) {
         val selection = chatSelection.value ?: return@withContext false
-        val opened = open(selection) ?: return@withContext false
+        chatStatus.value = ModelStatus.Loading
+        if (selection.displayName.endsWith(".litertlm", ignoreCase = true)) {
+            LocalLlmEngine.unloadChat()
+            val path = runCatching { materializeLiteRtlm(selection) }.getOrNull()
+            if (path == null) {
+                chatStatus.value = ModelStatus.Error("Could not copy .litertlm model")
+                chatBackend.value = null
+                return@withContext false
+            }
+            val updated = selection.copy(uri = path)
+            chatSelection.value = updated
+            write(CHAT, updated)
+            val loaded = LiteRtLmEngine.load(path, appContext.cacheDir.absolutePath)
+            if (loaded) {
+                chatBackend.value = ChatBackend.LITERT_LM
+                chatStatus.value = ModelStatus.Ready
+                setAutoLoad(true)
+            } else {
+                chatBackend.value = null
+                chatStatus.value = ModelStatus.Error(
+                    "Could not load .litertlm model",
+                )
+            }
+            return@withContext loaded
+        }
+
+        LiteRtLmEngine.unload()
+        val opened = open(selection)
+        if (opened == null) {
+            chatStatus.value = ModelStatus.Error("Could not open model file")
+            chatBackend.value = null
+            return@withContext false
+        }
         val loaded = opened.use { LocalLlmEngine.loadChat(it.path) }
-        if (loaded) setAutoLoad(true)
+        if (loaded) {
+            chatBackend.value = ChatBackend.LLAMA_CPP
+            chatStatus.value = ModelStatus.Ready
+            setAutoLoad(true)
+        } else {
+            chatBackend.value = null
+            chatStatus.value = LocalLlmEngine.chatStatus.value
+        }
         loaded
+    }
+
+    suspend fun unloadChat() = withContext(Dispatchers.IO) {
+        LiteRtLmEngine.unload()
+        LocalLlmEngine.unloadChat()
+        chatBackend.value = null
+        chatStatus.value = ModelStatus.Unloaded
+    }
+
+    fun generateChat(system: String, turns: List<ChatTurn>): Flow<String> = when (chatBackend.value) {
+        ChatBackend.LITERT_LM -> LiteRtLmEngine.generate(system, turns)
+        ChatBackend.LLAMA_CPP -> LocalLlmEngine.generate(
+            LocalLlmEngine.formatPrompt(system, turns),
+        )
+        null -> flow { error("No local chat model is loaded") }
+    }
+
+    fun stopChat() {
+        LiteRtLmEngine.cancel()
+        LocalLlmEngine.stopGeneration()
+    }
+
+    private fun materializeLiteRtlm(selection: Selection): String? {
+        val uri = Uri.parse(selection.uri)
+        if (uri.scheme.isNullOrBlank()) {
+            return selection.uri.takeIf { File(it).isFile }
+        }
+        if (uri.scheme == "file") {
+            return uri.path?.takeIf { File(it).isFile }
+        }
+        if (uri.scheme != "content") return null
+        val modelsDir = File(appContext.filesDir, "models").apply { mkdirs() }
+        val safeName = selection.displayName
+            .substringAfterLast('/')
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val destination = File(modelsDir, safeName.ifBlank { "model.litertlm" })
+        appContext.contentResolver.openInputStream(uri)?.use { input ->
+            destination.outputStream().use { output -> input.copyTo(output) }
+        } ?: return null
+        return destination.absolutePath
     }
 
     suspend fun loadEmbedding(): Boolean = withContext(Dispatchers.IO) {
         val selection = embeddingSelection.value ?: return@withContext false
-        val opened = open(selection) ?: return@withContext false
-        val loaded = opened.use { LocalLlmEngine.loadEmbedding(it.path) }
+        LocalLlmEngine.embeddingStatus.value = ModelStatus.Loading
+        val path = runCatching { materializeGguf(selection) }.getOrNull()
+        if (path == null) {
+            LocalLlmEngine.embeddingStatus.value =
+                ModelStatus.Error("Could not copy embedding model into app storage")
+            return@withContext false
+        }
+        if (path != selection.uri) {
+            val updated = selection.copy(uri = path)
+            embeddingSelection.value = updated
+            write(EMBEDDING, updated)
+        }
+        val loaded = LocalLlmEngine.loadEmbedding(path)
         if (loaded) setAutoLoad(true)
         loaded
     }
 
-    suspend fun ensureChatLoaded(): Boolean =
-        LocalLlmEngine.chatStatus.value is ModelStatus.Ready || loadChat()
+    private fun materializeGguf(selection: Selection): String? {
+        val uri = Uri.parse(selection.uri)
+        if (uri.scheme.isNullOrBlank()) {
+            return selection.uri.takeIf { File(it).isFile }
+        }
+        if (uri.scheme == "file") {
+            return uri.path?.takeIf { File(it).isFile }
+        }
+        if (uri.scheme != "content") return null
+        val modelsDir = File(appContext.filesDir, "models").apply { mkdirs() }
+        val safeName = selection.displayName
+            .substringAfterLast('/')
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .ifBlank { "embedding.gguf" }
+        val destination = File(modelsDir, safeName)
+        if (destination.isFile && selection.size > 0 &&
+            destination.length() == selection.size
+        ) {
+            return destination.absolutePath
+        }
+        appContext.contentResolver.openInputStream(uri)?.use { input ->
+            destination.outputStream().use { output -> input.copyTo(output) }
+        } ?: return null
+        return destination.absolutePath
+    }
 
-    private fun describe(context: Context, uri: Uri): Selection? {
+    suspend fun ensureChatLoaded(): Boolean =
+        chatStatus.value is ModelStatus.Ready || loadChat()
+
+    private fun describe(context: Context, uri: Uri, role: ModelRole): Selection? {
         var name: String? = null
         var size = 0L
         runCatching {
@@ -98,7 +224,13 @@ object ModelManager {
                 }
         }
         val displayName = name ?: uri.lastPathSegment ?: return null
-        if (!displayName.endsWith(".gguf", ignoreCase = true)) return null
+        val isGguf = displayName.endsWith(".gguf", ignoreCase = true)
+        val isLiteRt = displayName.endsWith(".litertlm", ignoreCase = true)
+        val allowed = when (role) {
+            ModelRole.CHAT -> isGguf || isLiteRt
+            ModelRole.EMBEDDING -> isGguf
+        }
+        if (!allowed) return null
         return Selection(uri.toString(), displayName, size)
     }
 
