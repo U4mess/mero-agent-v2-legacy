@@ -124,7 +124,7 @@ class DynamicIslandService : Service() {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             x = restingX(IslandAgent.status.value)
             y = collapsedY()
-            title = "Ume Island"
+            title = "Mero Agent Island"
             layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
             } else {

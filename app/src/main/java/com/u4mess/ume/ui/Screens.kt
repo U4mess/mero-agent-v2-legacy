@@ -86,6 +86,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -103,6 +104,7 @@ import androidx.work.WorkManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.u4mess.ume.BuildConfig
 import com.u4mess.ume.UmeApplication
 import com.u4mess.ume.brain.LocalLlmEngine
 import com.u4mess.ume.brain.ModelStatus
@@ -266,7 +268,7 @@ fun MemoryScreen() {
                 body = if (filtered) {
                     "Try a different word or filter."
                 } else {
-                    "Notifications and screen captures Ume stores will appear here."
+                    "Notifications and screen captures Mero Agent stores will appear here."
                 },
                 modifier = Modifier.weight(1f),
             )
@@ -307,6 +309,7 @@ fun MemoryScreen() {
 @Composable
 fun SettingsScreen() {
     val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
     var refresh by remember { mutableIntStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -695,7 +698,7 @@ fun SettingsScreen() {
                 Column(Modifier.weight(1f).padding(end = 12.dp)) {
                     Text("Voice replies (TTS)", color = TextPrimary, fontSize = 15.sp)
                     Text(
-                        text = if (voiceReplies) "Ume reads replies aloud" else "Off",
+                        text = if (voiceReplies) "Mero Agent reads replies aloud" else "Off",
                         color = TextSecondary,
                         fontSize = 12.sp,
                     )
@@ -1107,6 +1110,69 @@ fun SettingsScreen() {
             }
         }
 
+        Spacer(Modifier.height(12.dp))
+
+        UmeCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            UmeSectionHeader(
+                title = "About",
+                modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 8.dp),
+            )
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Mero Agent",
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "v${BuildConfig.VERSION_NAME}",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Created by U4mess",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable {
+                            runCatching { uriHandler.openUri("https://github.com/U4mess") }
+                        }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "github.com/U4mess",
+                        color = Accent,
+                        fontSize = 12.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "\u2197",
+                        color = TextSecondary,
+                        fontSize = 13.sp,
+                    )
+                }
+            }
+        }
+
         Spacer(Modifier.height(32.dp))
     }
 }
@@ -1421,7 +1487,7 @@ private fun MemoryDetailSheet(memory: MemoryEntity, onDismiss: () -> Unit) {
     val title = memory.title.ifBlank { memoryFallbackTitle(memory.source) }
     val packageLabel = memory.packageName.ifBlank {
         if (memory.source == MemorySource.ACTION || memory.source == MemorySource.SUMMARY) {
-            "Ume Agent"
+            "Mero Agent"
         } else {
             "unknown"
         }
@@ -1501,7 +1567,7 @@ private fun MemoryDetailSheet(memory: MemoryEntity, onDismiss: () -> Unit) {
                         .background(TextPrimary)
                         .clickable {
                             context.getSystemService(ClipboardManager::class.java)
-                                ?.setPrimaryClip(ClipData.newPlainText("Ume memory", fullText))
+                                ?.setPrimaryClip(ClipData.newPlainText("Mero Agent memory", fullText))
                             Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
                         }
                         .padding(horizontal = 16.dp, vertical = 9.dp),

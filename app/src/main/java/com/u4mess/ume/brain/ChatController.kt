@@ -409,7 +409,7 @@ object ChatController {
         if (ScreenReaderAccessibilityService.instance == null) {
             replace(
                 assistantId,
-                "Enable Ume Accessibility in Settings so I can read and tap the screen.",
+                "Enable Mero Agent Accessibility in Settings so I can read and tap the screen.",
             )
             notifyIsland("Accessibility off")
             return
@@ -479,12 +479,12 @@ object ChatController {
         return buildString {
             if (local) {
                 if (modelName != null) {
-                    append("You are Ume, a private on-device AI assistant running locally via $modelName.")
+                    append("You are Mero Agent, a private on-device AI assistant running locally via $modelName.")
                 } else {
-                    append("You are Ume, a private on-device AI assistant running locally.")
+                    append("You are Mero Agent, a private on-device AI assistant running locally.")
                 }
             } else {
-                append("You are Ume, a helpful AI assistant with access to the user's memories.")
+                append("You are Mero Agent, a helpful AI assistant with access to the user's memories.")
             }
             append(" Answer directly and concisely.")
             if (memories.isNotEmpty()) {
@@ -532,7 +532,7 @@ object ChatController {
         withContext(Dispatchers.IO) {
             repository.insert(
                 source = MemorySource.ACTION,
-                packageName = "Ume Agent",
+                packageName = "Mero Agent",
                 title = "Action: ${goal.take(60)}",
                 content = buildString {
                     append(summary)

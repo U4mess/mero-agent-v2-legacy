@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Ume</string>
-    <string name="notification_channel">Ume floating island</string>
-    <string name="notification_title">Ume is ready</string>
-    <string name="notification_text">Tap to open Ume</string>
-    <string name="accessibility_description">Ume reads on-screen text and performs taps or typing only when you ask it to.</string>
+    <string name="app_name">Mero Agent</string>
+    <string name="notification_channel">Mero Agent floating island</string>
+    <string name="notification_title">Mero Agent is ready</string>
+    <string name="notification_text">Tap to open Mero Agent</string>
+    <string name="accessibility_description">Mero Agent reads on-screen text and performs taps or typing only when you ask it to.</string>
 </resources>

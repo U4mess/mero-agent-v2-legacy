@@ -186,13 +186,13 @@ fun VoiceChatSheet(onDismiss: () -> Unit) {
         listening && partial.isNotBlank() -> partial
         listening -> "Listening..."
         speaking && lastUme.isNotBlank() -> lastUme
-        generating -> "Ume is thinking..."
+        generating -> "Mero Agent is thinking..."
         lastUme.isNotBlank() -> lastUme
         else -> "Tap the monkey to start talking."
     }
     val status = when {
         muted -> "Muted"
-        speaking -> "Ume is speaking"
+        speaking -> "Mero Agent is speaking"
         listening -> "Listening"
         generating -> "Thinking"
         else -> "Ready"
@@ -224,7 +224,7 @@ fun VoiceChatSheet(onDismiss: () -> Unit) {
             verticalArrangement = Arrangement.Center,
         ) {
             Text(
-                text = "Talk to Ume",
+                text = "Talk to Mero Agent",
                 color = TextPrimary,
                 fontFamily = UmeSerif,
                 fontSize = 28.sp,
@@ -272,7 +272,7 @@ fun VoiceChatSheet(onDismiss: () -> Unit) {
                                 startListeningNow()
                             }
                         }
-                        .semantics { contentDescription = "Talk to Ume" },
+                        .semantics { contentDescription = "Talk to Mero Agent" },
                     mood = when {
                         listening -> MonkeyMood.ACTING
                         generating -> MonkeyMood.THINKING
@@ -320,7 +320,7 @@ fun VoiceChatSheet(onDismiss: () -> Unit) {
             }
             Spacer(Modifier.height(10.dp))
             Text(
-                text = "Speak naturally. Ume listens, answers, then listens again.",
+                text = "Speak naturally. Mero Agent listens, answers, then listens again.",
                 color = TextSecondary,
                 fontSize = 10.sp,
                 textAlign = TextAlign.Center,

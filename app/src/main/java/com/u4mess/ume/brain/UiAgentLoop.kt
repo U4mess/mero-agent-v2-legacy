@@ -96,7 +96,7 @@ object UiAgentLoop {
         if (ScreenReaderAccessibilityService.instance == null) {
             return UiAgentResult(
                 success = false,
-                message = "Enable Ume Accessibility in Settings before running phone actions.",
+                message = "Enable Mero Agent Accessibility in Settings before running phone actions.",
                 steps = emptyList(),
             )
         }

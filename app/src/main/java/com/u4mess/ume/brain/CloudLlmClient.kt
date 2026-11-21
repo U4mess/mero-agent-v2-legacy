@@ -93,7 +93,7 @@ object CloudLlmClient {
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Authorization", "Bearer $apiKey")
-                setRequestProperty("X-Title", "Ume")
+                setRequestProperty("X-Title", "Mero Agent")
             }
 
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }

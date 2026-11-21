@@ -159,10 +159,10 @@ internal fun DynamicIsland(
                             interactionSource = interactionSource,
                             indication = null,
                             role = Role.Button,
-                            onClickLabel = "Open Ume",
+                            onClickLabel = "Open Mero Agent",
                             onClick = onExpand,
                         )
-                        .semantics { contentDescription = "Ume" }
+                        .semantics { contentDescription = "Mero Agent" }
                 },
             )
             .padding(
@@ -234,7 +234,7 @@ internal fun DynamicIsland(
                 decorationBox = { innerTextField ->
                     Box {
                         if (prompt.isEmpty()) {
-                            Text("Ask Ume...", color = IslandTextSecondary, fontSize = 14.sp)
+                            Text("Ask Mero Agent...", color = IslandTextSecondary, fontSize = 14.sp)
                         }
                         innerTextField()
                     }

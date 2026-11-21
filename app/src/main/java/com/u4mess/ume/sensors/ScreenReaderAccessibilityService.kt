@@ -67,7 +67,7 @@ class ScreenReaderAccessibilityService : AccessibilityService() {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 x = (xOffsetDp * density).toInt()
                 y = (offsetDp * density).toInt()
-                title = "Ume Island Touch"
+                title = "Mero Agent Island Touch"
                 layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                 } else {

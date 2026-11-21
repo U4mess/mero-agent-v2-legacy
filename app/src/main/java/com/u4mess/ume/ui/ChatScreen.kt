@@ -289,7 +289,7 @@ fun ChatScreen() {
         if (messages.isEmpty()) {
             EmptyState(
                 title = "Nothing here yet",
-                body = "Ask Ume from the floating pill or type below.",
+                body = "Ask Mero Agent from the floating pill or type below.",
                 modifier = Modifier.weight(1f),
             )
         } else {
@@ -787,8 +787,8 @@ private fun MessageBubble(
         val bubbleColor = if (dark) Color(0xFF1A1918) else Color(0xFFFFFFFF)
         val bubbleBorder = if (dark) Color(0xFF2C2A28) else Color(0xFFE6E2DA)
         val badge = when {
-            message.proactive -> "UME \u00B7 DAILY SUMMARY"
-            message.agent != null -> "UME \u00B7 AGENT"
+            message.proactive -> "MERO AGENT \u00B7 DAILY SUMMARY"
+            message.agent != null -> "MERO AGENT \u00B7 AGENT"
             else -> null
         }
 
@@ -1328,7 +1328,7 @@ private fun ChatInput(
                     Box {
                         if (value.isEmpty()) {
                             Text(
-                                text = if (generating) "Generating..." else "Message Ume",
+                                text = if (generating) "Generating..." else "Message Mero Agent",
                                 color = TextSecondary,
                                 fontSize = 14.sp,
                             )
