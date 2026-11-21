@@ -51,6 +51,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -168,17 +169,10 @@ fun MemoryScreen() {
     var memories by remember { mutableStateOf<List<MemoryEntity>>(emptyList()) }
     var selectedMemory by remember { mutableStateOf<MemoryEntity?>(null) }
     val charging = rememberCharging()
-    var latestSummary by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(keyword, sourceFilter, revisions) {
         memories = withContext(Dispatchers.IO) {
             repository.search(keyword, sourceFilter.ifBlank { null })
-        }
-    }
-
-    LaunchedEffect(revisions) {
-        latestSummary = withContext(Dispatchers.IO) {
-            repository.search(source = MemorySource.SUMMARY, limit = 1).firstOrNull()?.content
         }
     }
 
@@ -213,45 +207,13 @@ fun MemoryScreen() {
             .fillMaxSize()
             .imePadding(),
     ) {
-        ScreenHeader("Memory") {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Elevated)
-                        .border(1.dp, Border, RoundedCornerShape(12.dp))
-                        .clickable(onClick = captureScreen)
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        Modifier
-                            .size(5.dp)
-                            .clip(CircleShape)
-                            .background(if (connected) TextPrimary else TextSecondary),
-                    )
-                    Spacer(Modifier.width(7.dp))
-                    Text("Capture screen", color = TextPrimary, fontSize = 12.sp)
-                }
-                Text(
-                    text = "Import",
-                    color = TextPrimary,
-                    fontSize = 12.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Elevated)
-                        .border(1.dp, Border, RoundedCornerShape(12.dp))
-                        .clickable {
-                            importLauncher.launch(arrayOf("application/pdf", "image/*"))
-                        }
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                )
-            }
-        }
+        ScreenHeader("Memory")
 
         MemoryHero(
             charging = charging,
-            latestSummary = latestSummary,
+            memoryCount = memories.size,
+            onCapture = captureScreen,
+            onImport = { importLauncher.launch(arrayOf("application/pdf", "image/*")) },
             modifier = Modifier.padding(horizontal = 20.dp),
         )
 
@@ -432,19 +394,32 @@ fun SettingsScreen() {
                 title = "Appearance",
                 modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 8.dp),
             )
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                ThemeMode.entries.forEach { option ->
-                    ModelOptionPill(
-                        label = option.label,
-                        selected = themeMode == option,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        ThemeSettings.setMode(option)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ThemeMode.entries.take(3).forEach { option ->
+                        ModelOptionPill(
+                            label = option.label,
+                            selected = themeMode == option,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            ThemeSettings.setMode(option)
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ThemeMode.entries.drop(3).forEach { option ->
+                        ModelOptionPill(
+                            label = option.label,
+                            selected = themeMode == option,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            ThemeSettings.setMode(option)
+                        }
                     }
                 }
             }
@@ -1226,68 +1201,120 @@ private fun FilterPill(label: String, selected: Boolean, onClick: () -> Unit) {
 private val AmberAccent = Color(0xFFE0A458)
 
 @Composable
-private fun MemoryHero(charging: Boolean, latestSummary: String?, modifier: Modifier = Modifier) {
-    val shape = RoundedCornerShape(24.dp)
+private fun MemoryHero(
+    charging: Boolean,
+    memoryCount: Int,
+    onCapture: () -> Unit,
+    onImport: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val greeting = remember { greetingForHour(LocalTime.now().hour) }
-    val status = if (charging) "On the charger" else "Ready on-device"
-    val summary = latestSummary?.replace('\n', ' ')?.take(150)
-        ?: "Everything you notice, remembered on this device."
+    val countLabel = when (memoryCount) {
+        0 -> "No memories"
+        1 -> "1 memory"
+        else -> "$memoryCount memories"
+    }
 
-    Box(modifier = modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .shadow(6.dp, shape)
-                .clip(shape)
-                .background(Elevated)
-                .border(1.dp, Border, shape)
-                .padding(20.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(if (charging) AmberAccent else TextPrimary),
-                )
-                Spacer(Modifier.width(8.dp))
+    UmeCard(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(14.dp),
+        cornerRadius = 18.dp,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            UmeMonkeyFace(
+                Modifier.size(28.dp),
+                mood = if (charging) MonkeyMood.CHARGING else MonkeyMood.IDLE,
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
                 Text(
-                    text = status,
+                    text = countLabel,
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = if (charging) "Charging" else greeting,
                     color = TextSecondary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.6.sp,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = greeting,
-                color = TextPrimary,
-                fontFamily = UmeSerif,
-                fontSize = 27.sp,
-                lineHeight = 31.sp,
-                modifier = Modifier.fillMaxWidth(0.72f),
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = summary,
-                color = TextSecondary,
-                fontFamily = UmeSerif,
-                fontSize = 14.sp,
-                lineHeight = 20.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(0.72f),
-            )
+            HeroActionPill("Capture", capture = true, onClick = onCapture)
+            Spacer(Modifier.width(4.dp))
+            HeroActionPill("Import", capture = false, onClick = onImport)
         }
+    }
+}
 
-        UmeMonkeyFace(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset(x = 14.dp, y = (-12).dp)
-                .size(66.dp),
-            mood = if (charging) MonkeyMood.CHARGING else MonkeyMood.IDLE,
-        )
+@Composable
+private fun HeroActionPill(
+    label: String,
+    capture: Boolean,
+    onClick: () -> Unit,
+) {
+    val tint = TextSecondary
+    Row(
+        modifier = Modifier
+            .height(30.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Black)
+            .border(0.75.dp, Border, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Canvas(Modifier.size(12.dp)) {
+            val stroke = 1.2.dp.toPx()
+            if (capture) {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(stroke / 2f, stroke * 1.5f),
+                    size = Size(size.width - stroke, size.height - stroke * 2f),
+                    cornerRadius = CornerRadius(2.dp.toPx()),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(stroke),
+                )
+                drawCircle(
+                    color = tint,
+                    radius = size.minDimension * 0.16f,
+                    center = Offset(size.width / 2f, size.height / 2f),
+                )
+            } else {
+                drawLine(
+                    color = tint,
+                    start = Offset(size.width / 2f, 0f),
+                    end = Offset(size.width / 2f, size.height * 0.62f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = tint,
+                    start = Offset(size.width * 0.34f, size.height * 0.46f),
+                    end = Offset(size.width / 2f, size.height * 0.64f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = tint,
+                    start = Offset(size.width * 0.66f, size.height * 0.46f),
+                    end = Offset(size.width / 2f, size.height * 0.64f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = tint,
+                    start = Offset(size.width * 0.18f, size.height * 0.9f),
+                    end = Offset(size.width * 0.82f, size.height * 0.9f),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
+        Spacer(Modifier.width(4.dp))
+        Text(label, color = TextPrimary, fontSize = 10.sp, maxLines = 1)
     }
 }
 
@@ -1309,47 +1336,42 @@ private fun BentoMemoryCard(
     onOpen: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(22.dp)
     val title = memory.title.ifBlank { memoryFallbackTitle(memory.source) }
-    val packageLabel = memory.packageName.ifBlank {
-        if (memory.source == MemorySource.ACTION || memory.source == MemorySource.SUMMARY) {
-            "Ume Agent"
-        } else {
-            "unknown"
-        }
-    }
 
-    Column(
+    UmeCard(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 148.dp)
-            .shadow(2.dp, shape)
-            .clip(shape)
-            .background(Elevated)
-            .border(1.dp, Border, shape)
-            .clickable(onClick = onOpen)
-            .padding(13.dp),
+            .clickable(onClick = onOpen),
+        contentPadding = PaddingValues(12.dp),
+        cornerRadius = 18.dp,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             BentoSourceIcon(memory.source)
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(5.dp))
             Text(
                 text = memorySourceLabel(memory.source),
                 color = TextSecondary,
-                fontSize = 9.sp,
+                fontSize = 10.sp,
                 fontWeight = FontWeight.Medium,
-                letterSpacing = 0.7.sp,
+                letterSpacing = 0.8.sp,
                 maxLines = 1,
-                modifier = Modifier.weight(1f),
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Black)
+                    .border(0.75.dp, Border, RoundedCornerShape(6.dp))
+                    .padding(horizontal = 5.dp, vertical = 2.dp),
             )
+            Spacer(Modifier.weight(1f))
             Text(
                 text = "\u00D7",
                 color = TextSecondary,
-                fontSize = 15.sp,
+                fontSize = 14.sp,
                 modifier = Modifier
                     .clip(CircleShape)
                     .clickable(onClick = onDelete)
-                    .padding(horizontal = 5.dp)
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
                     .semantics { contentDescription = "Delete memory" },
             )
         }
@@ -1359,9 +1381,9 @@ private fun BentoMemoryCard(
         Text(
             text = title,
             color = TextPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            lineHeight = 17.sp,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            lineHeight = 18.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
@@ -1371,8 +1393,8 @@ private fun BentoMemoryCard(
             Text(
                 text = memory.content.replace('\n', ' '),
                 color = TextSecondary,
-                fontSize = 11.5.sp,
-                lineHeight = 15.sp,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1381,9 +1403,9 @@ private fun BentoMemoryCard(
         Spacer(Modifier.height(8.dp))
 
         Text(
-            text = "$packageLabel \u00B7 ${formatTimestamp(memory.timestamp)}",
+            text = formatTimestamp(memory.timestamp),
             color = TextSecondary,
-            fontSize = 9.sp,
+            fontSize = 10.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -1418,6 +1440,7 @@ private fun MemoryDetailSheet(memory: MemoryEntity, onDismiss: () -> Unit) {
         containerColor = Elevated,
         contentColor = TextPrimary,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        dragHandle = { BottomSheetDefaults.DragHandle(color = TextSecondary.copy(alpha = 0.5f)) },
     ) {
         Column(
             Modifier
@@ -1605,6 +1628,7 @@ private fun memorySourceLabel(source: String): String = when (source) {
     MemorySource.SUMMARY -> "SUMMARY"
     MemorySource.SCREENSHOT -> "SCREENSHOT"
     MemorySource.PDF -> "PDF"
+    MemorySource.MANUAL -> "NOTE"
     else -> source.uppercase(Locale.getDefault())
 }
 

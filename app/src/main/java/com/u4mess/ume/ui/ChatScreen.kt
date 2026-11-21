@@ -4,6 +4,8 @@ import android.Manifest
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,6 +30,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
@@ -39,6 +42,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -48,12 +52,16 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -61,6 +69,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.u4mess.ume.brain.AgentStep
+import com.u4mess.ume.brain.ChatAttachment
+import com.u4mess.ume.brain.ChatAttachmentExtractor
+import com.u4mess.ume.brain.ChatAttachmentKind
+import com.u4mess.ume.brain.ChatAttachmentStore
 import com.u4mess.ume.brain.ChatController
 import com.u4mess.ume.brain.ChatMode
 import com.u4mess.ume.brain.ChatRole
@@ -75,6 +87,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 
 /** Lets the floating Ask button focus the Chat composer. */
 object ChatFocusRequest {
@@ -117,6 +130,8 @@ fun ChatScreen() {
     var input by rememberSaveable { mutableStateOf("") }
     var showVoiceChat by rememberSaveable { mutableStateOf(false) }
     var selectedWebSources by remember { mutableStateOf<List<WebResult>?>(null) }
+    var stagedAttachment by remember { mutableStateOf<ChatAttachment?>(null) }
+    val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     var previousMessageCount by remember { mutableIntStateOf(0) }
     val inputFocus = remember { FocusRequester() }
@@ -128,6 +143,23 @@ fun ChatScreen() {
             input = ""
         }
     }
+    val attachLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val attachment = runCatching {
+                    ChatAttachmentExtractor.extract(context, uri)
+                }.getOrNull()
+                if (attachment == null || attachment.text.isBlank()) {
+                    Toast.makeText(context, "Could not read this file", Toast.LENGTH_SHORT).show()
+                } else {
+                    stagedAttachment = attachment
+                }
+            }
+        }
+    }
+
     val micLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -185,6 +217,24 @@ fun ChatScreen() {
             if (request > 0) {
                 inputFocus.requestFocus()
                 keyboard?.show()
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        ChatAttachmentStore.sharedText.collect { text ->
+            if (!text.isNullOrBlank()) {
+                input = text
+                ChatAttachmentStore.consumeSharedText()
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        ChatAttachmentStore.sharedAttachment.collect { attachment ->
+            if (attachment != null) {
+                stagedAttachment = attachment
+                ChatAttachmentStore.consumeSharedAttachment()
             }
         }
     }
@@ -266,19 +316,28 @@ fun ChatScreen() {
             )
         }
 
+        stagedAttachment?.let { attachment ->
+            AttachmentChip(attachment) { stagedAttachment = null }
+        }
+
         ChatInput(
             value = input,
             onValueChange = { input = it },
             generating = generating,
+            hasAttachment = stagedAttachment != null,
             focusRequester = inputFocus,
             imeVisible = imeVisible,
             isListening = listening,
             rmsLevel = rmsLevel,
             onMicClick = onMicClick,
+            onAttachClick = {
+                attachLauncher.launch(arrayOf("application/pdf", "image/*", "text/*"))
+            },
             onSend = {
-                if (input.isNotBlank()) {
-                    ChatController.send(input)
+                if (input.isNotBlank() || stagedAttachment != null) {
+                    ChatController.send(input, stagedAttachment)
                     input = ""
+                    stagedAttachment = null
                 }
             },
         )
@@ -305,67 +364,142 @@ private fun ChatHeader(
     onTalk: () -> Unit,
     onStop: () -> Unit,
 ) {
+    val haptic = LocalHapticFeedback.current
+    val hapticTap = {
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    }
+    val statusColor = when (mood) {
+        MonkeyMood.THINKING, MonkeyMood.ACTING -> Accent
+        MonkeyMood.CHARGING -> Color(0xFFE0A458)
+        else -> TextSecondary
+    }
+
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 8.dp),
+            .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            UmeMonkeyFace(Modifier.size(40.dp), mood = mood)
-            Spacer(Modifier.width(10.dp))
+            UmeMonkeyFace(Modifier.size(32.dp), mood = mood)
+            Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    text = "Ume",
-                    color = TextPrimary,
-                    fontFamily = UmeSerif,
-                    fontSize = 23.sp,
-                )
-                Text(
-                    text = subtitle,
-                    color = TextSecondary,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Ume",
+                        color = TextPrimary,
+                        fontFamily = UmeSerif,
+                        fontSize = 21.sp,
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Box(
+                        Modifier
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(statusColor),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = subtitle,
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
-            TalkModeButton(onClick = onTalk)
+            TalkModeButton(onClick = { hapticTap(); onTalk() })
             if (generating) {
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(4.dp))
                 Text(
                     text = "Stop",
                     color = TextPrimary,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     modifier = Modifier
+                        .height(32.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Elevated)
-                        .border(1.dp, Border, RoundedCornerShape(12.dp))
+                        .border(0.75.dp, Border, RoundedCornerShape(12.dp))
                         .clickable(onClick = onStop)
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
                 )
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "MODE",
-                color = TextSecondary,
-                fontSize = 9.sp,
-                letterSpacing = 0.8.sp,
-            )
-            Spacer(Modifier.width(8.dp))
-            ChatMode.entries.forEach { option ->
-                ChatModePill(
-                    label = option.label,
-                    selected = mode == option,
-                    onClick = { onModeChange(option) },
-                )
-                Spacer(Modifier.width(5.dp))
+            Row(
+                modifier = Modifier
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Elevated)
+                    .border(0.75.dp, Border, RoundedCornerShape(14.dp))
+                    .padding(2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ChatMode.entries.forEach { option ->
+                    val selected = mode == option
+                    val optionBackground by animateColorAsState(
+                        targetValue = if (selected) TextPrimary else Color.Transparent,
+                        animationSpec = tween(180),
+                        label = "modeBackground",
+                    )
+                    val optionText by animateColorAsState(
+                        targetValue = if (selected) Black else TextSecondary,
+                        animationSpec = tween(180),
+                        label = "modeText",
+                    )
+                    Box(
+                        modifier = Modifier
+                            .height(32.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(optionBackground)
+                            .clickable {
+                                hapticTap()
+                                onModeChange(option)
+                            }
+                            .padding(horizontal = 9.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = option.label,
+                            color = optionText,
+                            fontSize = 10.sp,
+                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                        )
+                    }
+                }
             }
-            ChatModePill(
-                label = "Web",
-                selected = webEnabled,
-                onClick = onToggleWeb,
+            Spacer(Modifier.width(8.dp))
+            val webBackground by animateColorAsState(
+                targetValue = if (webEnabled) Accent else Elevated,
+                animationSpec = tween(180),
+                label = "webBackground",
             )
+            val webText by animateColorAsState(
+                targetValue = if (webEnabled) OnAccent else TextSecondary,
+                animationSpec = tween(180),
+                label = "webText",
+            )
+            Box(
+                modifier = Modifier
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(webBackground)
+                    .border(0.75.dp, if (webEnabled) Accent else Border, RoundedCornerShape(14.dp))
+                    .clickable {
+                        hapticTap()
+                        onToggleWeb()
+                    }
+                    .padding(horizontal = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "Web",
+                    color = webText,
+                    fontSize = 10.sp,
+                    fontWeight = if (webEnabled) FontWeight.Medium else FontWeight.Normal,
+                )
+            }
         }
     }
 }
@@ -375,11 +509,12 @@ private fun TalkModeButton(onClick: () -> Unit) {
     val tint = TextPrimary
     Row(
         modifier = Modifier
+            .height(32.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(Elevated)
-            .border(1.dp, Border, RoundedCornerShape(12.dp))
+            .border(0.75.dp, Border, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 9.dp, vertical = 7.dp),
+            .padding(horizontal = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Canvas(Modifier.size(13.dp)) {
@@ -443,6 +578,10 @@ private fun MessageBubble(
                     .background(bubbleColor)
                     .padding(horizontal = 14.dp, vertical = 9.dp),
             ) {
+                message.attachment?.let { attachment ->
+                    AttachmentInlinePill(attachment)
+                    Spacer(Modifier.height(4.dp))
+                }
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
                         text = message.text,
@@ -773,17 +912,123 @@ private fun ApprovalButton(label: String, filled: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
+private fun AttachmentChip(
+    attachment: ChatAttachment,
+    onClear: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 20.dp, top = 8.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Elevated)
+            .border(0.75.dp, Border, RoundedCornerShape(14.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AttachmentTypeBadge(attachment.kind, Color.Transparent, TextSecondary)
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = attachment.name,
+                color = TextPrimary,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = attachment.kind.label.lowercase() + " attachment",
+                color = TextSecondary,
+                fontSize = 9.sp,
+            )
+        }
+        Text(
+            text = "\u00D7",
+            color = TextSecondary,
+            fontSize = 16.sp,
+            modifier = Modifier
+                .clip(CircleShape)
+                .clickable(onClick = onClear)
+                .padding(horizontal = 4.dp)
+                .semantics { contentDescription = "Clear attachment" },
+        )
+    }
+}
+
+@Composable
+private fun AttachmentTypeBadge(
+    kind: ChatAttachmentKind,
+    background: Color,
+    foreground: Color,
+) {
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(background)
+            .border(0.75.dp, Border, RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = when (kind) {
+                ChatAttachmentKind.PDF -> "PDF"
+                ChatAttachmentKind.IMAGE -> "IMG"
+                ChatAttachmentKind.TEXT -> "TXT"
+            },
+            color = foreground,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.3.sp,
+        )
+    }
+}
+
+@Composable
+private fun AttachmentInlinePill(attachment: ChatAttachment) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White.copy(alpha = 0.14f))
+            .padding(horizontal = 7.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = when (attachment.kind) {
+                ChatAttachmentKind.PDF -> "PDF"
+                ChatAttachmentKind.IMAGE -> "IMG"
+                ChatAttachmentKind.TEXT -> "TXT"
+            },
+            color = Color.White,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.4.sp,
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = attachment.name,
+            color = Color.White.copy(alpha = 0.9f),
+            fontSize = 10.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
 private fun ChatInput(
     value: String,
     onValueChange: (String) -> Unit,
     generating: Boolean,
+    hasAttachment: Boolean,
     focusRequester: FocusRequester,
     imeVisible: Boolean,
     isListening: Boolean,
     rmsLevel: Float,
     onMicClick: () -> Unit,
+    onAttachClick: () -> Unit,
     onSend: () -> Unit,
 ) {
+    val canSend = (value.isNotBlank() || hasAttachment) && !generating
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -799,12 +1044,25 @@ private fun ChatInput(
             modifier = Modifier
                 .weight(1f)
                 .height(48.dp)
-                .clip(RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(22.dp))
                 .background(Elevated)
-                .border(1.dp, Border, RoundedCornerShape(24.dp))
-                .padding(start = 16.dp, end = 6.dp),
+                .border(0.75.dp, Border, RoundedCornerShape(22.dp))
+                .padding(start = 8.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(Black)
+                    .border(0.75.dp, Border, CircleShape)
+                    .clickable(enabled = !generating, onClick = onAttachClick)
+                    .semantics { contentDescription = "Attach file" },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("+", color = TextPrimary, fontSize = 18.sp, lineHeight = 18.sp)
+            }
+            Spacer(Modifier.width(6.dp))
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
@@ -839,13 +1097,13 @@ private fun ChatInput(
             Spacer(Modifier.width(6.dp))
             Text(
                 text = "Send",
-                color = if (value.isNotBlank() && !generating) Black else TextSecondary,
+                color = if (canSend) OnAccent else TextSecondary,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
                     .clip(RoundedCornerShape(16.dp))
-                    .background(if (value.isNotBlank() && !generating) TextPrimary else Border)
-                    .clickable(enabled = value.isNotBlank() && !generating, onClick = onSend)
+                    .background(if (canSend) Accent else Border)
+                    .clickable(enabled = canSend, onClick = onSend)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }

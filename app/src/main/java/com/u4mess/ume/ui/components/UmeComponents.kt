@@ -25,20 +25,23 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.u4mess.ume.ui.Accent
 import com.u4mess.ume.ui.Border
 import com.u4mess.ume.ui.Elevated
 import com.u4mess.ume.ui.TextSecondary
 import com.u4mess.ume.ui.UmeDark
+import com.u4mess.ume.ui.UmeDynamic
 
 @Composable
 fun UmeCard(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(16.dp),
+    cornerRadius: Dp = 22.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val shape = RoundedCornerShape(22.dp)
+    val shape = RoundedCornerShape(cornerRadius)
     Column(
         modifier = modifier
             .then(if (UmeDark) Modifier else Modifier.shadow(1.dp, shape))
@@ -75,7 +78,7 @@ fun UmeSlider(
 ) {
     val dark = UmeDark
     val accent = Accent
-    val active = if (dark) accent else Color(0xFF18181A)
+    val active = if (dark || UmeDynamic) accent else Color(0xFF18181A)
     val inactive = if (dark) Color(0xFF262422) else Color(0xFFE6E2DA)
     val thumbFill = if (dark) Color(0xFF181716) else Color(0xFFFFFFFF)
 

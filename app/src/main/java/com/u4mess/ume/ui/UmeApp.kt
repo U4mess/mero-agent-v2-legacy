@@ -80,6 +80,12 @@ fun UmeApp() {
         }
     }
 
+    LaunchedEffect(Unit) {
+        ChatFocusRequest.requests.collect { request ->
+            if (request > 0) tab = Tab.Chat
+        }
+    }
+
     Scaffold(
         containerColor = Black,
         bottomBar = {

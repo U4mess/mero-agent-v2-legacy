@@ -118,6 +118,35 @@ object MediaDocumentIndexer {
             android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 
+    /** Reusable OCR/PDF extraction for Chat attachments. */
+    suspend fun extractText(uri: Uri, mimeType: String? = null): String = withContext(Dispatchers.IO) {
+        if (!::appContext.isInitialized) return@withContext ""
+        val name = queryDisplayName(appContext.contentResolver, uri)
+            ?: uri.lastPathSegment.orEmpty()
+        val type = mimeType ?: runCatching { appContext.contentResolver.getType(uri) }.getOrNull()
+        val extension = name.substringAfterLast('.', "").lowercase()
+        val isPdf = type == "application/pdf" || extension == "pdf"
+        val isImage = type?.startsWith("image/") == true ||
+            extension in setOf("png", "jpg", "jpeg", "webp", "heic", "heif")
+        runCatching {
+            when {
+                isPdf -> extractPdfText(uri)
+                isImage -> extractImageText(uri)
+                else -> ""
+            }
+        }.getOrElse { throwable ->
+            Log.e("UmeMediaIndex", "Failed to extract attachment $uri", throwable)
+            ""
+        }
+    }
+
+    fun displayName(uri: Uri): String =
+        if (::appContext.isInitialized) {
+            queryDisplayName(appContext.contentResolver, uri) ?: uri.lastPathSegment.orEmpty()
+        } else {
+            uri.lastPathSegment.orEmpty()
+        }
+
     /**
      * Runs the same OCR/PDF pipeline for an explicitly imported SAF document.
      * Returns true only when a memory was actually inserted.

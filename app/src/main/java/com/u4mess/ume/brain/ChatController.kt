@@ -44,6 +44,12 @@ object ChatController {
         val proactive: Boolean = false,
         val agent: UiAgentResult? = null,
         val webSources: List<WebResult> = emptyList(),
+        val attachment: ChatAttachment? = null,
+    )
+
+    private data class IncomingPrompt(
+        val text: String,
+        val attachment: ChatAttachment? = null,
     )
 
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
@@ -56,7 +62,7 @@ object ChatController {
     val webEnabled = MutableStateFlow(false)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val pending = Channel<String>(Channel.UNLIMITED)
+    private val pending = Channel<IncomingPrompt>(Channel.UNLIMITED)
     private var nextId = 0L
     private var islandConsumed = 0
     private var started = false
@@ -73,25 +79,35 @@ object ChatController {
         IslandAgent.setStopHandler { stop() }
 
         scope.launch {
-            for (prompt in pending) {
-                _messages.update { it + Message(nextId++, ChatRole.USER, prompt) }
-                generate(prompt)
+            for (incoming in pending) {
+                _messages.update {
+                    it + Message(
+                        nextId++,
+                        ChatRole.USER,
+                        incoming.text,
+                        attachment = incoming.attachment,
+                    )
+                }
+                generate(incoming.text, incoming.attachment)
             }
         }
 
         scope.launch {
             PromptInbox.prompts.collect { prompts ->
                 if (prompts.size > islandConsumed) {
-                    prompts.subList(islandConsumed, prompts.size).forEach { pending.trySend(it) }
+                    prompts.subList(islandConsumed, prompts.size)
+                        .forEach { pending.trySend(IncomingPrompt(it)) }
                     islandConsumed = prompts.size
                 }
             }
         }
     }
 
-    fun send(prompt: String) {
-        val text = prompt.trim()
-        if (text.isNotEmpty()) pending.trySend(text)
+    fun send(prompt: String, attachment: ChatAttachment? = null) {
+        val text = prompt.trim().ifBlank {
+            if (attachment != null) "What's in this attachment?" else ""
+        }
+        if (text.isNotEmpty()) pending.trySend(IncomingPrompt(text, attachment))
     }
 
     fun setMode(value: ChatMode) {
@@ -125,7 +141,7 @@ object ChatController {
         LocalLlmEngine.stopGeneration()
     }
 
-    private suspend fun generate(prompt: String) {
+    private suspend fun generate(prompt: String, attachment: ChatAttachment? = null) {
         _generating.value = true
         val assistantId = nextId++
         _messages.update { it + Message(assistantId, ChatRole.ASSISTANT, "", streaming = true) }
@@ -137,6 +153,14 @@ object ChatController {
             val cleaned = HybridRouter.clean(chatPrompt)
             val route = HybridRouter.route(if (explicitWeb) chatPrompt else raw)
             val useWeb = route != HybridRoute.CLOUD && (explicitWeb || webEnabled.value)
+
+            val attachmentBlock = attachment
+                ?.takeIf { it.text.isNotBlank() }
+                ?.let {
+                    "Attached file: ${it.name} (${it.kind.label}).\n" +
+                        "${it.text}\n" +
+                        "Use the attached content to answer the user's question."
+                }
 
             var webBlock: String? = null
             if (useWeb) {
@@ -155,19 +179,19 @@ object ChatController {
                 }
 
                 mode.value == ChatMode.CLOUD -> {
-                    generateCloudChat(cleaned, assistantId, webBlock)
+                    generateCloudChat(cleaned, assistantId, webBlock, attachmentBlock)
                 }
 
                 mode.value == ChatMode.LOCAL -> {
-                    generateLocal(cleaned, assistantId, webBlock)
+                    generateLocal(cleaned, assistantId, webBlock, attachmentBlock)
                 }
 
                 LocalLlmEngine.chatStatus.value is ModelStatus.Ready -> {
-                    generateLocal(cleaned, assistantId, webBlock)
+                    generateLocal(cleaned, assistantId, webBlock, attachmentBlock)
                 }
 
                 CloudSettings.hasKey() -> {
-                    generateCloudChat(cleaned, assistantId, webBlock)
+                    generateCloudChat(cleaned, assistantId, webBlock, attachmentBlock)
                 }
 
                 else -> {
@@ -192,7 +216,12 @@ object ChatController {
         }
     }
 
-    private suspend fun generateLocal(prompt: String, assistantId: Long, webBlock: String? = null) {
+    private suspend fun generateLocal(
+        prompt: String,
+        assistantId: Long,
+        webBlock: String? = null,
+        attachmentBlock: String? = null,
+    ) {
         if (LocalLlmEngine.chatStatus.value !is ModelStatus.Ready) {
             replace(
                 assistantId,
@@ -201,7 +230,11 @@ object ChatController {
             return
         }
 
-        val system = buildSystemPrompt(prompt, webBlock = webBlock)
+        val system = buildSystemPrompt(
+            prompt,
+            webBlock = webBlock,
+            attachmentBlock = attachmentBlock,
+        )
         val turns = _messages.value
             .filter { it.id != assistantId && it.text.isNotBlank() }
             .takeLast(8)
@@ -220,7 +253,12 @@ object ChatController {
         }
     }
 
-    private suspend fun generateCloudChat(prompt: String, assistantId: Long, webBlock: String? = null) {
+    private suspend fun generateCloudChat(
+        prompt: String,
+        assistantId: Long,
+        webBlock: String? = null,
+        attachmentBlock: String? = null,
+    ) {
         if (prompt.isBlank()) {
             replace(assistantId, "Tell me what to do, or just say hello.")
             return
@@ -235,7 +273,12 @@ object ChatController {
             return
         }
 
-        val system = buildSystemPrompt(prompt, local = false, webBlock = webBlock)
+        val system = buildSystemPrompt(
+            prompt,
+            local = false,
+            webBlock = webBlock,
+            attachmentBlock = attachmentBlock,
+        )
         val turns = _messages.value
             .filter { it.id != assistantId && it.text.isNotBlank() }
             .takeLast(8)
@@ -348,6 +391,7 @@ object ChatController {
         query: String,
         local: Boolean = true,
         webBlock: String? = null,
+        attachmentBlock: String? = null,
     ): String {
         val memories = retrieveMemories(query)
         val modelName = ModelManager.chatSelection.value?.displayName
@@ -378,6 +422,10 @@ object ChatController {
                     "\nAnswer the user's question concisely using the live results above. " +
                         "Do not say you lack internet access.",
                 )
+            }
+            if (attachmentBlock != null) {
+                append("\n\n")
+                append(attachmentBlock)
             }
         }
     }

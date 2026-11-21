@@ -9,6 +9,7 @@ enum class ThemeMode(val label: String) {
     DARK("Dark"),
     LIGHT("Light"),
     SYSTEM("System"),
+    DYNAMIC("Dynamic"),
 }
 
 object ThemeSettings {

@@ -1,10 +1,13 @@
 package com.u4mess.ume.ui
 
 import android.app.Activity
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -14,6 +17,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -67,6 +71,7 @@ val UmeSerif = FontFamily.Serif
 
 private val LocalUmePalette = staticCompositionLocalOf { OledPalette }
 private val LocalUmeDark = staticCompositionLocalOf { true }
+private val LocalUmeDynamic = staticCompositionLocalOf { false }
 
 // Token names kept from the original OLED theme; each resolves from the active palette.
 val Black: Color
@@ -93,6 +98,9 @@ val OnAccent: Color
 val UmeDark: Boolean
     @Composable @ReadOnlyComposable get() = LocalUmeDark.current
 
+val UmeDynamic: Boolean
+    @Composable @ReadOnlyComposable get() = LocalUmeDynamic.current
+
 private val UmeTypography = Typography(
     titleLarge = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp),
     titleMedium = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.2).sp),
@@ -107,15 +115,30 @@ fun UmeTheme(content: @Composable () -> Unit) {
     val dark = when (selected) {
         ThemeMode.OLED, ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
-        ThemeMode.SYSTEM -> systemDark
+        ThemeMode.SYSTEM, ThemeMode.DYNAMIC -> systemDark
+    }
+    val context = LocalContext.current
+    val dynamicScheme = if (selected == ThemeMode.DYNAMIC && Build.VERSION.SDK_INT >= 31) {
+        if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    } else {
+        null
     }
     val palette = when {
+        dynamicScheme != null -> UmePalette(
+            background = dynamicScheme.background,
+            surface = dynamicScheme.surface,
+            border = dynamicScheme.outlineVariant,
+            textPrimary = dynamicScheme.onBackground,
+            textSecondary = dynamicScheme.onSurfaceVariant,
+            accent = dynamicScheme.primary,
+            onAccent = dynamicScheme.onPrimary,
+        )
         selected == ThemeMode.OLED -> OledPalette
         dark -> DarkPalette
         else -> LightPalette
     }
 
-    val scheme = if (dark) {
+    val scheme = dynamicScheme ?: if (dark) {
         darkColorScheme(
             primary = palette.accent,
             onPrimary = palette.onAccent,
@@ -160,6 +183,7 @@ fun UmeTheme(content: @Composable () -> Unit) {
     CompositionLocalProvider(
         LocalUmePalette provides palette,
         LocalUmeDark provides dark,
+        LocalUmeDynamic provides (dynamicScheme != null),
     ) {
         MaterialTheme(colorScheme = scheme, typography = UmeTypography, content = content)
     }

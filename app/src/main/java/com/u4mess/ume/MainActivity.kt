@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
@@ -12,8 +13,13 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
+import com.u4mess.ume.brain.ChatAttachmentExtractor
+import com.u4mess.ume.brain.ChatAttachmentStore
+import com.u4mess.ume.ui.ChatFocusRequest
 import com.u4mess.ume.ui.UmeApp
 import com.u4mess.ume.ui.UmeTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -46,6 +52,10 @@ class MainActivity : ComponentActivity() {
                 UmeApp()
             }
         }
+
+        if (savedInstanceState == null) {
+            handleSharedIntent(intent)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -53,6 +63,31 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         if (intent.getBooleanExtra(EXTRA_REQUEST_MIC, false)) {
             requestMicrophonePermission()
+        }
+        handleSharedIntent(intent)
+    }
+
+    private fun handleSharedIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) return
+        ChatFocusRequest.request()
+
+        intent.getStringExtra(Intent.EXTRA_TEXT)
+            ?.takeIf { it.isNotBlank() }
+            ?.let(ChatAttachmentStore::stageSharedText)
+
+        val stream = if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        } ?: return
+
+        lifecycleScope.launch {
+            val attachment = runCatching {
+                ChatAttachmentExtractor.extract(this@MainActivity, stream)
+            }.getOrNull() ?: return@launch
+            ChatAttachmentStore.stageSharedAttachment(attachment)
+            ChatFocusRequest.request()
         }
     }
 
