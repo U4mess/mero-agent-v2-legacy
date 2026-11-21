@@ -36,6 +36,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -114,6 +115,7 @@ fun ChatScreen() {
     var input by rememberSaveable { mutableStateOf("") }
     var showVoiceChat by rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    var previousMessageCount by remember { mutableIntStateOf(0) }
     val inputFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
 
@@ -194,7 +196,17 @@ fun ChatScreen() {
     }
 
     LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length) {
-        if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
+        if (messages.isEmpty()) {
+            previousMessageCount = 0
+            return@LaunchedEffect
+        }
+        val lastIndex = messages.lastIndex
+        if (messages.size != previousMessageCount) {
+            previousMessageCount = messages.size
+            listState.animateScrollToItem(lastIndex)
+        } else {
+            listState.scrollToItem(lastIndex)
+        }
     }
 
     Column(
@@ -224,7 +236,12 @@ fun ChatScreen() {
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                contentPadding = PaddingValues(
+                    start = 20.dp,
+                    end = 20.dp,
+                    top = 8.dp,
+                    bottom = 16.dp,
+                ),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(messages, key = { it.id }) { message ->

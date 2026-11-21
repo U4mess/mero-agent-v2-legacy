@@ -12,6 +12,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.core.content.ContextCompat
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,6 +39,7 @@ object VoiceInputManager {
     private var finalResult: ((String) -> Unit)? = null
     private var ignoreResults = false
     private var stopRequested = false
+    private val hasDeliveredResult = AtomicBoolean(false)
 
     private val stopTimeout = Runnable {
         if (_isListening.value && stopRequested) {
@@ -79,6 +81,7 @@ object VoiceInputManager {
             mainHandler.removeCallbacks(stopTimeout)
             ignoreResults = false
             stopRequested = false
+            hasDeliveredResult.set(false)
             finalResult = onFinalResult
             _errorMessage.value = null
             _partialTranscript.value = ""
@@ -116,6 +119,7 @@ object VoiceInputManager {
     fun cancel() {
         runOnMain {
             ignoreResults = true
+            hasDeliveredResult.set(true)
             finalResult = null
             stopRequested = false
             mainHandler.removeCallbacks(stopTimeout)
@@ -145,6 +149,7 @@ object VoiceInputManager {
 
     private fun finishSession(message: String?) {
         mainHandler.removeCallbacks(stopTimeout)
+        hasDeliveredResult.set(true)
         _isListening.value = false
         _rmsLevel.value = 0f
         stopRequested = false
@@ -184,6 +189,7 @@ object VoiceInputManager {
                 ignoreResults = false
                 return
             }
+            if (hasDeliveredResult.get()) return
             finishSession(errorMessage(error))
         }
 
@@ -192,6 +198,7 @@ object VoiceInputManager {
                 ignoreResults = false
                 return
             }
+            if (!hasDeliveredResult.compareAndSet(false, true)) return
             val text = bestResult(results).ifBlank { _partialTranscript.value }
             mainHandler.removeCallbacks(stopTimeout)
             _isListening.value = false

@@ -47,7 +47,7 @@
 [ObjectBox] Written com.u4mess.ume.memory.MemoryEntityCursor.java
 [ObjectBox] Written com.u4mess.ume.memory.MemoryEntity_.java
 [ObjectBox] Written com.u4mess.ume.memory.MyObjectBox.java
-[ObjectBox] Processed 1 entities in 19ms
+[ObjectBox] Processed 1 entities in 20ms
 
 > Task :app:compileDebugKotlin
 > Task :app:compileDebugJavaWithJavac UP-TO-DATE
