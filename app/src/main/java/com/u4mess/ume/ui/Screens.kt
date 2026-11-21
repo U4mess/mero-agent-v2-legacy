@@ -118,6 +118,9 @@ import com.u4mess.ume.settings.CloudSettings
 import com.u4mess.ume.settings.ThemeMode
 import com.u4mess.ume.settings.ThemeSettings
 import com.u4mess.ume.settings.WebSearchSettings
+import com.u4mess.ume.ui.components.UmeCard
+import com.u4mess.ume.ui.components.UmeSectionHeader
+import com.u4mess.ume.ui.components.UmeSlider
 import com.u4mess.ume.voice.VoiceOutputManager
 import java.time.Instant
 import java.time.LocalDate
@@ -419,19 +422,14 @@ fun SettingsScreen() {
     ) {
         ScreenHeader("Settings")
 
-        Column(
+        UmeCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-                .shadow(3.dp, RoundedCornerShape(24.dp))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Elevated)
-                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(0.dp),
         ) {
-            Text(
-                text = "Appearance",
-                color = TextSecondary,
-                style = MaterialTheme.typography.labelSmall,
+            UmeSectionHeader(
+                title = "Appearance",
                 modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 8.dp),
             )
             Row(
@@ -454,19 +452,14 @@ fun SettingsScreen() {
 
         Spacer(Modifier.height(12.dp))
 
-        Column(
+        UmeCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-                .shadow(3.dp, RoundedCornerShape(24.dp))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Elevated)
-                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(0.dp),
         ) {
-            Text(
-                text = "Permissions",
-                color = TextSecondary,
-                style = MaterialTheme.typography.labelSmall,
+            UmeSectionHeader(
+                title = "Permissions",
                 modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp),
             )
 
@@ -627,7 +620,7 @@ fun SettingsScreen() {
                         fontSize = 12.sp,
                     )
                 }
-                Slider(
+                UmeSlider(
                     value = yOffset,
                     onValueChange = {
                         yOffset = it
@@ -637,13 +630,6 @@ fun SettingsScreen() {
                         IslandSettings.persistYOffset(yOffset.roundToInt())
                     },
                     valueRange = 0f..IslandSettings.MAX_Y_OFFSET_DP.toFloat(),
-                    colors = SliderDefaults.colors(
-                        thumbColor = TextPrimary,
-                        activeTrackColor = TextPrimary,
-                        inactiveTrackColor = Border,
-                        activeTickColor = TextPrimary,
-                        inactiveTickColor = Border,
-                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 2.dp),
@@ -665,7 +651,7 @@ fun SettingsScreen() {
                         fontSize = 12.sp,
                     )
                 }
-                Slider(
+                UmeSlider(
                     value = islandWidth,
                     onValueChange = {
                         islandWidth = it
@@ -675,13 +661,6 @@ fun SettingsScreen() {
                         IslandSettings.persistWidth(islandWidth.roundToInt())
                     },
                     valueRange = IslandSettings.MIN_WIDTH_DP.toFloat()..IslandSettings.MAX_WIDTH_DP.toFloat(),
-                    colors = SliderDefaults.colors(
-                        thumbColor = TextPrimary,
-                        activeTrackColor = TextPrimary,
-                        inactiveTrackColor = Border,
-                        activeTickColor = TextPrimary,
-                        inactiveTickColor = Border,
-                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 2.dp),
@@ -703,7 +682,7 @@ fun SettingsScreen() {
                         fontSize = 12.sp,
                     )
                 }
-                Slider(
+                UmeSlider(
                     value = xOffset,
                     onValueChange = {
                         xOffset = it
@@ -713,13 +692,6 @@ fun SettingsScreen() {
                         IslandSettings.persistXOffset(xOffset.roundToInt())
                     },
                     valueRange = IslandSettings.MIN_X_OFFSET_DP.toFloat()..IslandSettings.MAX_X_OFFSET_DP.toFloat(),
-                    colors = SliderDefaults.colors(
-                        thumbColor = TextPrimary,
-                        activeTrackColor = TextPrimary,
-                        inactiveTrackColor = Border,
-                        activeTickColor = TextPrimary,
-                        inactiveTickColor = Border,
-                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 2.dp),
@@ -729,19 +701,14 @@ fun SettingsScreen() {
 
         Spacer(Modifier.height(12.dp))
 
-        Column(
+        UmeCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .shadow(3.dp, RoundedCornerShape(24.dp))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Elevated)
-                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+                .padding(horizontal = 20.dp),
+            contentPadding = PaddingValues(0.dp),
         ) {
-            Text(
-                text = "Voice",
-                color = TextSecondary,
-                style = MaterialTheme.typography.labelSmall,
+            UmeSectionHeader(
+                title = "Voice",
                 modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp),
             )
             Row(
@@ -789,17 +756,10 @@ fun SettingsScreen() {
                         fontSize = 12.sp,
                     )
                 }
-                Slider(
+                UmeSlider(
                     value = speechRate,
                     onValueChange = { VoiceOutputManager.setRate(it) },
                     valueRange = 0.8f..1.5f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = TextPrimary,
-                        activeTrackColor = TextPrimary,
-                        inactiveTrackColor = Border,
-                        activeTickColor = TextPrimary,
-                        inactiveTickColor = Border,
-                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 2.dp),
@@ -809,19 +769,14 @@ fun SettingsScreen() {
 
         Spacer(Modifier.height(12.dp))
 
-        Column(
+        UmeCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .shadow(3.dp, RoundedCornerShape(24.dp))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Elevated)
-                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+                .padding(horizontal = 20.dp),
+            contentPadding = PaddingValues(0.dp),
         ) {
-            Text(
-                text = "Web Search",
-                color = TextSecondary,
-                style = MaterialTheme.typography.labelSmall,
+            UmeSectionHeader(
+                title = "Web Search",
                 modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp),
             )
             Row(
@@ -903,19 +858,14 @@ fun SettingsScreen() {
 
         Spacer(Modifier.height(12.dp))
 
-        Column(
+        UmeCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .shadow(3.dp, RoundedCornerShape(24.dp))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Elevated)
-                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+                .padding(horizontal = 20.dp),
+            contentPadding = PaddingValues(0.dp),
         ) {
-            Text(
-                text = "Cloud Action Brain",
-                color = TextSecondary,
-                style = MaterialTheme.typography.labelSmall,
+            UmeSectionHeader(
+                title = "Cloud Action Brain",
                 modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 8.dp),
             )
 
@@ -1144,19 +1094,14 @@ fun SettingsScreen() {
 
         Spacer(Modifier.height(12.dp))
 
-        Column(
+        UmeCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .shadow(3.dp, RoundedCornerShape(24.dp))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Elevated)
-                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+                .padding(horizontal = 20.dp),
+            contentPadding = PaddingValues(0.dp),
         ) {
-            Text(
-                text = "Maintenance",
-                color = TextSecondary,
-                style = MaterialTheme.typography.labelSmall,
+            UmeSectionHeader(
+                title = "Maintenance",
                 modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp),
             )
             Row(

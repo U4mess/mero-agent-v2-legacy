@@ -29,30 +29,38 @@ private data class UmePalette(
     val border: Color,
     val textPrimary: Color,
     val textSecondary: Color,
+    val accent: Color,
+    val onAccent: Color,
 )
 
 private val OledPalette = UmePalette(
     background = Color(0xFF000000),
-    surface = Color(0xFF0D0D0D),
-    border = Color(0xFF1F1F1F),
+    surface = Color(0xFF0E0E0E),
+    border = Color(0xFF222222),
     textPrimary = Color(0xFFFFFFFF),
-    textSecondary = Color(0xFFA0A0A0),
+    textSecondary = Color(0xFF8E8A84),
+    accent = Color(0xFF9E582B),
+    onAccent = Color(0xFFFFFFFF),
 )
 
 private val DarkPalette = UmePalette(
-    background = Color(0xFF141312),
-    surface = Color(0xFF1F1D1B),
-    border = Color(0xFF2F2B27),
-    textPrimary = Color(0xFFFFFFFF),
-    textSecondary = Color(0xFFB8B2A8),
+    background = Color(0xFF0F0E0D),
+    surface = Color(0xFF181716),
+    border = Color(0xFF292724),
+    textPrimary = Color(0xFFF5F3EF),
+    textSecondary = Color(0xFF9E9890),
+    accent = Color(0xFF9E582B),
+    onAccent = Color(0xFFFFFFFF),
 )
 
 private val LightPalette = UmePalette(
     background = Color(0xFFF5F3EF),
     surface = Color(0xFFFFFFFF),
-    border = Color(0xFFE8E2D8),
-    textPrimary = Color(0xFF1A1A1A),
+    border = Color(0xFFE6E2DA),
+    textPrimary = Color(0xFF18181A),
     textSecondary = Color(0xFF6E6A63),
+    accent = Color(0xFFB86B3A),
+    onAccent = Color(0xFFFFFFFF),
 )
 
 val UmeSerif = FontFamily.Serif
@@ -76,14 +84,20 @@ val TextPrimary: Color
 val TextSecondary: Color
     @Composable @ReadOnlyComposable get() = LocalUmePalette.current.textSecondary
 
+val Accent: Color
+    @Composable @ReadOnlyComposable get() = LocalUmePalette.current.accent
+
+val OnAccent: Color
+    @Composable @ReadOnlyComposable get() = LocalUmePalette.current.onAccent
+
 val UmeDark: Boolean
     @Composable @ReadOnlyComposable get() = LocalUmeDark.current
 
 private val UmeTypography = Typography(
-    titleLarge = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp),
-    titleMedium = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Medium),
+    titleLarge = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.3).sp),
+    titleMedium = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.2).sp),
     bodyMedium = TextStyle(fontSize = 14.sp, letterSpacing = 0.1.sp),
-    labelSmall = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium, letterSpacing = 1.sp),
+    labelSmall = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.8.sp),
 )
 
 @Composable
@@ -103,8 +117,8 @@ fun UmeTheme(content: @Composable () -> Unit) {
 
     val scheme = if (dark) {
         darkColorScheme(
-            primary = palette.textPrimary,
-            onPrimary = palette.background,
+            primary = palette.accent,
+            onPrimary = palette.onAccent,
             secondary = palette.textSecondary,
             onSecondary = palette.background,
             background = palette.background,
@@ -118,8 +132,8 @@ fun UmeTheme(content: @Composable () -> Unit) {
         )
     } else {
         lightColorScheme(
-            primary = palette.textPrimary,
-            onPrimary = palette.background,
+            primary = palette.accent,
+            onPrimary = palette.onAccent,
             secondary = palette.textSecondary,
             onSecondary = palette.background,
             background = palette.background,

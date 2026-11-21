@@ -1,5 +1,7 @@
 package com.u4mess.ume.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -59,7 +61,7 @@ private enum class Tab(val label: String) {
 }
 
 private val DockBackground = Color(0xFF18181A)
-private val DockBorder = Color(0xFF2A292D)
+private val DockBorder = Color(0xFF2A2826)
 private val DockText = Color(0xFFF5F1EA)
 private val DockMuted = Color(0xFF8E8A84)
 private val DockAskSelected = Color(0xFF2C2924)
@@ -121,7 +123,12 @@ private fun FloatingDock(
     onAsk: () -> Unit,
     onSelect: (Tab) -> Unit,
 ) {
-    val shape = RoundedCornerShape(32.dp)
+    val shape = RoundedCornerShape(30.dp)
+    val askColor by animateColorAsState(
+        targetValue = if (selectedTab == Tab.Chat) DockAskSelected else Color.Transparent,
+        animationSpec = tween(220),
+        label = "dockAsk",
+    )
 
     Box(
         Modifier
@@ -132,19 +139,19 @@ private fun FloatingDock(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp)
+                .height(60.dp)
                 .shadow(18.dp, shape)
                 .clip(shape)
                 .background(DockBackground)
-                .border(1.dp, DockBorder, shape)
+                .border(0.75.dp, DockBorder, shape)
                 .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
                 modifier = Modifier
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(if (selectedTab == Tab.Chat) DockAskSelected else Color.Transparent)
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(askColor)
                     .clickable(onClick = onAsk)
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -177,12 +184,17 @@ private fun FloatingDock(
 @Composable
 private fun DockTab(tab: Tab, selected: Boolean, onClick: () -> Unit) {
     val tint = if (selected) DockText else DockMuted
+    val highlight by animateColorAsState(
+        targetValue = if (selected) DockTabSelected else Color.Transparent,
+        animationSpec = tween(220),
+        label = "dockTab",
+    )
 
     Column(
         modifier = Modifier
-            .height(48.dp)
+            .height(44.dp)
             .clip(RoundedCornerShape(20.dp))
-            .background(if (selected) DockTabSelected else Color.Transparent)
+            .background(highlight)
             .clickable(onClick = onClick)
             .padding(horizontal = 9.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

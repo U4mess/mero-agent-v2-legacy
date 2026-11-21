@@ -39,6 +39,7 @@ import com.u4mess.ume.brain.LocalLlmEngine
 import com.u4mess.ume.brain.ModelManager
 import com.u4mess.ume.brain.ModelRole
 import com.u4mess.ume.brain.ModelStatus
+import com.u4mess.ume.ui.components.UmeCard
 import java.util.Locale
 import kotlinx.coroutines.launch
 
@@ -120,15 +121,10 @@ private fun ModelCard(
     val loading = status is ModelStatus.Loading
     val ready = status is ModelStatus.Ready
 
-    Column(
+    UmeCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 8.dp)
-            .shadow(3.dp, RoundedCornerShape(24.dp))
-            .clip(RoundedCornerShape(24.dp))
-            .background(Elevated)
-            .border(1.dp, Border, RoundedCornerShape(24.dp))
-            .padding(16.dp),
+            .padding(horizontal = 20.dp, vertical = 8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(

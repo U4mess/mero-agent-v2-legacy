@@ -25,9 +25,10 @@
 > Task :app:mergeDebugAssets UP-TO-DATE
 > Task :app:compressDebugAssets UP-TO-DATE
 > Task :app:desugarDebugFileDependencies UP-TO-DATE
-> Task :app:checkDebugDuplicateClasses
-> Task :app:configureCMakeDebug[arm64-v8a]
+> Task :app:checkDebugDuplicateClasses UP-TO-DATE
+> Task :app:mergeExtDexDebug UP-TO-DATE
 > Task :app:mergeLibDexDebug UP-TO-DATE
+> Task :app:configureCMakeDebug[arm64-v8a]
 > Task :app:buildCMakeDebug[arm64-v8a]
 > Task :app:mergeDebugJniLibFolders UP-TO-DATE
 > Task :app:mergeDebugNativeLibs UP-TO-DATE
@@ -36,7 +37,6 @@
 > Task :app:writeDebugAppMetadata UP-TO-DATE
 > Task :app:writeDebugSigningConfigVersions UP-TO-DATE
 > Task :app:kaptGenerateStubsDebugKotlin
-> Task :app:mergeExtDexDebug
 
 > Task :app:kaptDebugKotlin
 [ObjectBox] ID model file unchanged: default.json
@@ -47,10 +47,10 @@
 [ObjectBox] Written com.u4mess.ume.memory.MemoryEntityCursor.java
 [ObjectBox] Written com.u4mess.ume.memory.MemoryEntity_.java
 [ObjectBox] Written com.u4mess.ume.memory.MyObjectBox.java
-[ObjectBox] Processed 1 entities in 35ms
+[ObjectBox] Processed 1 entities in 19ms
 
 > Task :app:compileDebugKotlin
-> Task :app:compileDebugJavaWithJavac
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
 > Task :app:processDebugJavaRes
 > Task :app:transformDebugClassesWithAsm
 > Task :app:mergeDebugJavaResource
@@ -61,5 +61,5 @@
 > Task :app:createDebugApkListingFileRedirect UP-TO-DATE
 > Task :app:assembleDebug
 
-BUILD SUCCESSFUL in 11s
-44 actionable tasks: 14 executed, 30 up-to-date
+BUILD SUCCESSFUL in 4s
+44 actionable tasks: 11 executed, 33 up-to-date
