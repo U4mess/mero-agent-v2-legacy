@@ -9,6 +9,7 @@ object MemorySource {
     const val SCREEN = "screen"
     const val MANUAL = "manual"
     const val SUMMARY = "summary"
+    const val ACTION = "action"
 }
 
 @Entity

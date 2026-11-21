@@ -29,6 +29,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +57,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -76,6 +79,7 @@ import com.u4mess.ume.memory.NightlyConsolidator
 import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
 import com.u4mess.ume.service.DynamicIslandService
 import com.u4mess.ume.service.IslandState
+import com.u4mess.ume.settings.CloudSettings
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -228,6 +232,10 @@ fun SettingsScreen() {
             }
     }
     val islandRunning by IslandState.running.collectAsState()
+    val cloudEnabled by CloudSettings.enabled.collectAsState()
+    val cloudModel by CloudSettings.model.collectAsState()
+    var apiKey by remember { mutableStateOf(CloudSettings.apiKey().orEmpty()) }
+    var keySaved by remember { mutableStateOf(CloudSettings.hasKey()) }
 
     Column(
         Modifier
@@ -299,6 +307,145 @@ fun SettingsScreen() {
                             context.stopService(intent)
                         }
                     },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Black,
+                        checkedTrackColor = TextPrimary,
+                        checkedBorderColor = TextPrimary,
+                        uncheckedThumbColor = TextSecondary,
+                        uncheckedTrackColor = Elevated,
+                        uncheckedBorderColor = Border,
+                    ),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Elevated)
+                .border(1.dp, Border, RoundedCornerShape(20.dp)),
+        ) {
+            Text(
+                text = "Cloud Action Brain (DeepSeek)",
+                color = TextSecondary,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 8.dp),
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Black)
+                        .border(1.dp, Border, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BasicTextField(
+                        value = apiKey,
+                        onValueChange = {
+                            apiKey = it
+                            keySaved = false
+                        },
+                        singleLine = true,
+                        textStyle = TextStyle(color = TextPrimary, fontSize = 13.sp),
+                        cursorBrush = SolidColor(TextPrimary),
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { innerTextField ->
+                            Box {
+                                if (apiKey.isEmpty()) {
+                                    Text("DeepSeek API key", color = TextSecondary, fontSize = 13.sp)
+                                }
+                                innerTextField()
+                            }
+                        },
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Save",
+                    color = Black,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(TextPrimary)
+                        .clickable {
+                            CloudSettings.saveApiKey(apiKey)
+                            keySaved = CloudSettings.hasKey()
+                            Toast.makeText(
+                                context,
+                                if (keySaved) "API key saved" else "API key cleared",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                )
+            }
+
+            Text(
+                text = if (keySaved) {
+                    "Encrypted with the Android Keystore"
+                } else {
+                    "No API key saved"
+                },
+                color = TextSecondary,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 20.dp, top = 6.dp),
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 20.dp, top = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Model",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.width(52.dp),
+                )
+                CloudSettings.models.forEach { option ->
+                    FilterPill(option, cloudModel == option) { CloudSettings.setModel(option) }
+                    Spacer(Modifier.width(8.dp))
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Hybrid Cloud Actions", color = TextPrimary, fontSize = 15.sp)
+                    Text(
+                        text = if (cloudEnabled) {
+                            "Phone actions through DeepSeek"
+                        } else {
+                            "Off — action prompts will ask you to enable it"
+                        },
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                Switch(
+                    checked = cloudEnabled,
+                    onCheckedChange = { CloudSettings.setEnabled(it) },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Black,
                         checkedTrackColor = TextPrimary,

@@ -1,12 +1,20 @@
 package com.u4mess.ume.brain
 
+import android.content.Context
 import com.u4mess.ume.memory.MemoryEntity
 import com.u4mess.ume.memory.MemoryRepository
+import com.u4mess.ume.memory.MemorySource
+import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
+import com.u4mess.ume.service.IslandAgent
 import com.u4mess.ume.service.PromptInbox
+import com.u4mess.ume.settings.CloudSettings
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,12 +42,17 @@ object ChatController {
     private var nextId = 0L
     private var islandConsumed = 0
     private var started = false
+    private var agentJob: Job? = null
+    private lateinit var appContext: Context
     private lateinit var repository: MemoryRepository
 
-    fun start(repository: MemoryRepository) {
+    fun start(context: Context, repository: MemoryRepository) {
         if (started) return
+        appContext = context.applicationContext
         this.repository = repository
         started = true
+
+        IslandAgent.setStopHandler { stop() }
 
         scope.launch {
             for (prompt in pending) {
@@ -64,6 +77,11 @@ object ChatController {
     }
 
     fun stop() {
+        val agent = agentJob
+        if (agent != null && agent.isActive) {
+            agent.cancel()
+            return
+        }
         LocalLlmEngine.stopGeneration()
     }
 
@@ -73,35 +91,118 @@ object ChatController {
         _messages.update { it + Message(assistantId, ChatRole.ASSISTANT, "", streaming = true) }
 
         try {
-            if (LocalLlmEngine.chatStatus.value !is ModelStatus.Ready) {
-                replace(
-                    assistantId,
-                    "No chat model loaded. Open Models, choose a .gguf file and tap Load.",
-                )
-                return
+            when (HybridRouter.route(prompt)) {
+                HybridRoute.LOCAL -> generateLocal(HybridRouter.clean(prompt), assistantId)
+                HybridRoute.CLOUD -> runCloudAction(HybridRouter.clean(prompt), assistantId)
             }
-
-            val system = buildSystemPrompt(prompt)
-            val turns = _messages.value
-                .filter { it.id != assistantId && it.text.isNotBlank() }
-                .takeLast(8)
-                .map { ChatTurn(it.role, it.text) }
-
-            val formatted = LocalLlmEngine.formatPrompt(system, turns)
-            LocalLlmEngine.generate(formatted).collect { piece -> append(assistantId, piece) }
-
-            if (textOf(assistantId).isBlank()) {
-                replace(assistantId, "The model returned no text.")
-            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (throwable: Throwable) {
             if (textOf(assistantId).isBlank()) {
-                replace(assistantId, "Generation failed: ${throwable.message ?: "unknown error"}")
+                replace(assistantId, "Something went wrong: ${throwable.message ?: "unknown error"}")
             }
         } finally {
             _messages.update { list ->
                 list.map { if (it.id == assistantId) it.copy(streaming = false) else it }
             }
             _generating.value = false
+        }
+    }
+
+    private suspend fun generateLocal(prompt: String, assistantId: Long) {
+        if (LocalLlmEngine.chatStatus.value !is ModelStatus.Ready) {
+            replace(
+                assistantId,
+                "No chat model loaded. Open Models, choose a .gguf file and tap Load.",
+            )
+            return
+        }
+
+        val system = buildSystemPrompt(prompt)
+        val turns = _messages.value
+            .filter { it.id != assistantId && it.text.isNotBlank() }
+            .takeLast(8)
+            .map { ChatTurn(it.role, it.text) }
+
+        val formatted = LocalLlmEngine.formatPrompt(system, turns)
+        LocalLlmEngine.generate(formatted).collect { piece -> append(assistantId, piece) }
+
+        if (textOf(assistantId).isBlank()) {
+            replace(assistantId, "The model returned no text.")
+        }
+    }
+
+    private suspend fun runCloudAction(goal: String, assistantId: Long) {
+        if (goal.isBlank()) {
+            replace(assistantId, "Tell me what to do, for example: /do open Settings.")
+            return
+        }
+        if (!CloudSettings.enabled.value) {
+            replace(
+                assistantId,
+                "Hybrid cloud actions are off. Turn them on in Settings → Cloud Action Brain, or use /local.",
+            )
+            notifyIsland("Cloud actions off")
+            return
+        }
+        if (!CloudSettings.hasKey()) {
+            replace(
+                assistantId,
+                "Add a DeepSeek API key in Settings → Cloud Action Brain before using phone actions.",
+            )
+            notifyIsland("Add DeepSeek key")
+            return
+        }
+        if (ScreenReaderAccessibilityService.instance == null) {
+            replace(
+                assistantId,
+                "Enable Ume Accessibility in Settings so I can read and tap the screen.",
+            )
+            notifyIsland("Accessibility off")
+            return
+        }
+
+        var outcome: UiAgentResult? = null
+        val job = scope.launch {
+            outcome = try {
+                UiAgentLoop.run(appContext, goal) { status ->
+                    IslandAgent.update(status, active = true)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (throwable: Throwable) {
+                UiAgentResult(false, throwable.message ?: "Action failed.", emptyList())
+            }
+        }
+        agentJob = job
+        try {
+            job.join()
+        } finally {
+            agentJob = null
+        }
+
+        val result = outcome
+        if (result == null) {
+            replace(assistantId, "Action stopped.")
+            IslandAgent.finish("Stopped")
+            recordAction(goal, "Stopped by user.", emptyList())
+        } else {
+            val summary = if (result.success) result.message else "Action failed: ${result.message}"
+            val chatText = buildString {
+                append(summary)
+                if (result.steps.isNotEmpty()) {
+                    append("\n\n")
+                    append(result.steps.takeLast(6).joinToString("\n"))
+                }
+            }
+            replace(assistantId, chatText)
+            IslandAgent.finish(if (result.success) "Done" else "Failed")
+            recordAction(goal, summary, result.steps)
+        }
+
+        scope.launch {
+            delay(2000)
+            IslandAgent.clearIfFinished()
         }
     }
 
@@ -135,6 +236,31 @@ object ChatController {
             (repository.search(keyword = query.take(80), limit = 5) + repository.recent(limit = 5))
                 .distinctBy { it.id }
                 .take(5)
+        }
+    }
+
+    private suspend fun recordAction(goal: String, summary: String, steps: List<String>) {
+        withContext(Dispatchers.IO) {
+            repository.insert(
+                source = MemorySource.ACTION,
+                packageName = "",
+                title = "Action: ${goal.take(60)}",
+                content = buildString {
+                    append(summary)
+                    if (steps.isNotEmpty()) {
+                        append("\n\n")
+                        append(steps.joinToString("\n"))
+                    }
+                },
+            )
+        }
+    }
+
+    private fun notifyIsland(text: String) {
+        IslandAgent.update(text, active = false)
+        scope.launch {
+            delay(2200)
+            IslandAgent.clearIfFinished()
         }
     }
 

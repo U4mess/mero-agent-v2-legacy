@@ -15,6 +15,8 @@ import android.view.MotionEvent
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.NotificationCompat
@@ -57,14 +59,19 @@ class DynamicIslandService : Service() {
             isFocusableInTouchMode = true
             setContent {
                 UmeTheme {
+                    val agentStatus by IslandAgent.status.collectAsState()
                     DynamicIsland(
                         expanded = expanded.value,
-                        onExpand = { setExpanded(true) },
+                        agentStatus = agentStatus,
+                        onExpand = {
+                            if (IslandAgent.status.value == null) setExpanded(true)
+                        },
                         onCollapse = { setExpanded(false) },
                         onSend = { text ->
                             PromptInbox.send(text)
                             setExpanded(false)
                         },
+                        onStopAgent = { IslandAgent.stop() },
                     )
                 }
             }

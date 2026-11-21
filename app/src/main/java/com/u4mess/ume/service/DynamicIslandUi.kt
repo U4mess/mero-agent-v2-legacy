@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.u4mess.ume.ui.Black
@@ -51,39 +52,58 @@ import com.u4mess.ume.ui.TextSecondary
 @Composable
 internal fun DynamicIsland(
     expanded: Boolean,
+    agentStatus: AgentStatus?,
     onExpand: () -> Unit,
     onCollapse: () -> Unit,
     onSend: (String) -> Unit,
+    onStopAgent: () -> Unit,
 ) {
     var prompt by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val interactionSource = remember { MutableInteractionSource() }
     val screenWidth = LocalConfiguration.current.screenWidthDp
+    val statusMode = agentStatus != null
 
     val width by animateDpAsState(
-        targetValue = if (expanded) (screenWidth - 32).dp else 96.dp,
+        targetValue = when {
+            statusMode -> (screenWidth - 72).dp
+            expanded -> (screenWidth - 32).dp
+            else -> 96.dp
+        },
         animationSpec = tween(260, easing = FastOutSlowInEasing),
         label = "islandWidth",
     )
     val height by animateDpAsState(
-        targetValue = if (expanded) 52.dp else 34.dp,
+        targetValue = when {
+            statusMode -> 40.dp
+            expanded -> 52.dp
+            else -> 34.dp
+        },
         animationSpec = tween(260, easing = FastOutSlowInEasing),
         label = "islandHeight",
     )
     val corner by animateDpAsState(
-        targetValue = if (expanded) 26.dp else 17.dp,
+        targetValue = when {
+            statusMode -> 20.dp
+            expanded -> 26.dp
+            else -> 17.dp
+        },
         animationSpec = tween(260, easing = FastOutSlowInEasing),
         label = "islandCorner",
     )
 
-    LaunchedEffect(expanded) {
-        if (expanded) {
+    LaunchedEffect(expanded, statusMode) {
+        if (expanded && !statusMode) {
             focusRequester.requestFocus()
         } else {
             focusManager.clearFocus()
-            prompt = ""
+            if (!expanded) prompt = ""
         }
+    }
+
+    LaunchedEffect(statusMode) {
+        if (statusMode && expanded) onCollapse()
     }
 
     fun send() {
@@ -102,7 +122,7 @@ internal fun DynamicIsland(
             .background(Black)
             .border(1.dp, Border, RoundedCornerShape(corner))
             .then(
-                if (expanded) {
+                if (expanded || statusMode) {
                     Modifier
                 } else {
                     Modifier
@@ -120,7 +140,37 @@ internal fun DynamicIsland(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Start,
     ) {
-        if (expanded) {
+        if (agentStatus != null) {
+            Box(
+                Modifier
+                    .size(7.dp)
+                    .clip(CircleShape)
+                    .background(TextPrimary),
+            )
+            Spacer(Modifier.width(9.dp))
+            Text(
+                text = agentStatus.text,
+                color = TextPrimary,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (agentStatus.active) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Stop",
+                    color = Black,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(TextPrimary)
+                        .clickable(onClick = onStopAgent)
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                )
+            }
+        } else if (expanded) {
             BasicTextField(
                 value = prompt,
                 onValueChange = { prompt = it },
