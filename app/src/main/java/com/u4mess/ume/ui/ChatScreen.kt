@@ -1,12 +1,17 @@
 package com.u4mess.ume.ui
 
 import android.Manifest
+import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -70,7 +75,9 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -83,8 +90,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.u4mess.ume.brain.AgentStep
 import com.u4mess.ume.brain.ChatAttachment
+import com.u4mess.ume.brain.ChatBackend
 import com.u4mess.ume.brain.ChatAttachmentExtractor
 import com.u4mess.ume.brain.ChatAttachmentKind
 import com.u4mess.ume.brain.ChatAttachmentStore
@@ -92,13 +102,16 @@ import com.u4mess.ume.brain.ChatController
 import com.u4mess.ume.brain.ChatMode
 import com.u4mess.ume.brain.ChatRole
 import com.u4mess.ume.brain.ChatSession
+import com.u4mess.ume.brain.ModelManager
 import com.u4mess.ume.brain.UiAgentResult
+import com.u4mess.ume.brain.VisionImage
 import com.u4mess.ume.net.WebResult
 import com.u4mess.ume.service.ApprovalRequest
 import com.u4mess.ume.service.IslandAgent
 import com.u4mess.ume.ui.components.MarkdownText
 import com.u4mess.ume.voice.VoiceChatSession
 import com.u4mess.ume.voice.VoiceInputManager
+import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -130,6 +143,7 @@ private val UmeShape = RoundedCornerShape(
     bottomStart = 6.dp,
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen() {
     val messages by ChatController.messages.collectAsState()
@@ -150,6 +164,9 @@ fun ChatScreen() {
     var showHistory by rememberSaveable { mutableStateOf(false) }
     var selectedWebSources by remember { mutableStateOf<List<WebResult>?>(null) }
     var stagedAttachment by remember { mutableStateOf<ChatAttachment?>(null) }
+    var showAttachSheet by remember { mutableStateOf(false) }
+    var preparingImage by remember { mutableStateOf(false) }
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     var previousMessageCount by remember { mutableIntStateOf(0) }
@@ -176,6 +193,58 @@ fun ChatScreen() {
                     stagedAttachment = attachment
                 }
             }
+        }
+    }
+
+    val preparePickedImage: (Uri) -> Unit = { uri ->
+        preparingImage = true
+        scope.launch {
+            val attachment = runCatching { VisionImage.prepare(context, uri) }.getOrNull()
+            preparingImage = false
+            if (attachment == null) {
+                Toast.makeText(context, "Could not prepare this image", Toast.LENGTH_SHORT).show()
+            } else {
+                stagedAttachment = attachment
+            }
+        }
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) preparePickedImage(uri)
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture(),
+    ) { success ->
+        val uri = pendingCameraUri
+        pendingCameraUri = null
+        if (success && uri != null) preparePickedImage(uri)
+    }
+
+    val openCamera: () -> Unit = {
+        val dir = File(context.cacheDir, "vision").apply { mkdirs() }
+        val file = File(dir, "camera_${System.currentTimeMillis()}.jpg")
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file,
+        )
+        pendingCameraUri = uri
+        runCatching { cameraLauncher.launch(uri) }.onFailure {
+            pendingCameraUri = null
+            Toast.makeText(context, "Camera is not available", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            openCamera()
+        } else {
+            Toast.makeText(context, "Camera permission is required.", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -323,6 +392,15 @@ fun ChatScreen() {
             )
         }
 
+        if (preparingImage) {
+            Text(
+                text = "Preparing image...",
+                color = TextSecondary,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 24.dp, top = 8.dp),
+            )
+        }
+
         stagedAttachment?.let { attachment ->
             AttachmentChip(attachment) { stagedAttachment = null }
         }
@@ -337,14 +415,22 @@ fun ChatScreen() {
             isListening = listening,
             rmsLevel = rmsLevel,
             onMicClick = onMicClick,
-            onAttachClick = {
-                attachLauncher.launch(arrayOf("application/pdf", "image/*", "text/*"))
-            },
+            onAttachClick = { showAttachSheet = true },
             onSend = {
-                if (input.isNotBlank() || stagedAttachment != null) {
-                    ChatController.send(input, stagedAttachment)
-                    input = ""
-                    stagedAttachment = null
+                when {
+                    stagedAttachment?.imagePath != null &&
+                        ModelManager.chatBackend.value != ChatBackend.LITERT_LM -> {
+                        Toast.makeText(
+                            context,
+                            "Load Gemma 4 E2B (.litertlm) in Models to use vision.",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                    input.isNotBlank() || stagedAttachment != null -> {
+                        ChatController.send(input, stagedAttachment)
+                        input = ""
+                        stagedAttachment = null
+                    }
                 }
             },
         )
@@ -356,6 +442,66 @@ fun ChatScreen() {
 
     selectedWebSources?.let { sources ->
         WebSourcesSheet(sources) { selectedWebSources = null }
+    }
+
+    if (showAttachSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showAttachSheet = false },
+            sheetState = sheetState,
+            containerColor = Black,
+            contentColor = TextPrimary,
+            scrimColor = Color.Black.copy(alpha = 0.72f),
+            dragHandle = { BottomSheetDefaults.DragHandle(color = Border) },
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
+            ) {
+                Text(
+                    text = "Add to chat",
+                    color = TextPrimary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(12.dp))
+                VisionSheetOption(
+                    title = "Camera",
+                    subtitle = "Take a photo with the camera",
+                    onClick = {
+                        showAttachSheet = false
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                            PackageManager.PERMISSION_GRANTED
+                        ) {
+                            openCamera()
+                        } else {
+                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                        }
+                    },
+                )
+                Spacer(Modifier.height(8.dp))
+                VisionSheetOption(
+                    title = "Gallery",
+                    subtitle = "Choose a photo from your library",
+                    onClick = {
+                        showAttachSheet = false
+                        galleryLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                        )
+                    },
+                )
+                Spacer(Modifier.height(8.dp))
+                VisionSheetOption(
+                    title = "File",
+                    subtitle = "PDF, image, or text attachment",
+                    onClick = {
+                        showAttachSheet = false
+                        attachLauncher.launch(arrayOf("application/pdf", "image/*", "text/*"))
+                    },
+                )
+            }
+        }
     }
 
     if (showHistory) {
@@ -1163,6 +1309,31 @@ private fun ApprovalButton(label: String, filled: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
+private fun VisionSheetOption(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Elevated)
+            .border(0.75.dp, Border, RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(2.dp))
+            Text(subtitle, color = TextSecondary, fontSize = 11.sp)
+        }
+        Text("\u203A", color = TextSecondary, fontSize = 20.sp)
+    }
+}
+
+@Composable
 private fun AttachmentChip(
     attachment: ChatAttachment,
     onClear: () -> Unit,
@@ -1177,7 +1348,21 @@ private fun AttachmentChip(
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AttachmentTypeBadge(attachment.kind, Color.Transparent, TextSecondary)
+        val bitmap = remember(attachment.imagePath) {
+            attachment.imagePath?.let { BitmapFactory.decodeFile(it) }
+        }
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "Attached image",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(10.dp)),
+            )
+        } else {
+            AttachmentTypeBadge(attachment.kind, Color.Transparent, TextSecondary)
+        }
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -1236,32 +1421,47 @@ private fun AttachmentTypeBadge(
 
 @Composable
 private fun AttachmentInlinePill(attachment: ChatAttachment) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.14f))
-            .padding(horizontal = 7.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = when (attachment.kind) {
-                ChatAttachmentKind.PDF -> "PDF"
-                ChatAttachmentKind.IMAGE -> "IMG"
-                ChatAttachmentKind.TEXT -> "TXT"
-            },
-            color = Color.White,
-            fontSize = 8.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.4.sp,
+    val bitmap = remember(attachment.imagePath) {
+        attachment.imagePath?.let { BitmapFactory.decodeFile(it) }
+    }
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = "Sent image",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .width(190.dp)
+                .height(128.dp)
+                .clip(RoundedCornerShape(10.dp)),
         )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            text = attachment.name,
-            color = Color.White.copy(alpha = 0.9f),
-            fontSize = 10.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+    } else {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White.copy(alpha = 0.14f))
+                .padding(horizontal = 7.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = when (attachment.kind) {
+                    ChatAttachmentKind.PDF -> "PDF"
+                    ChatAttachmentKind.IMAGE -> "IMG"
+                    ChatAttachmentKind.TEXT -> "TXT"
+                },
+                color = Color.White,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.4.sp,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = attachment.name,
+                color = Color.White.copy(alpha = 0.9f),
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

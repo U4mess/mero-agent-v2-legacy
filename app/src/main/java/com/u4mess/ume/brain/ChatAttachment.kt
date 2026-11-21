@@ -24,6 +24,7 @@ data class ChatAttachment(
     val mimeType: String,
     val kind: ChatAttachmentKind,
     val text: String,
+    val imagePath: String? = null,
 )
 
 object ChatAttachmentStore {

@@ -11,6 +11,7 @@ import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
 import com.u4mess.ume.service.IslandAgent
 import com.u4mess.ume.service.PromptInbox
 import com.u4mess.ume.settings.CloudSettings
+import com.u4mess.ume.settings.LanguageMode
 import com.u4mess.ume.settings.LanguageSettings
 import com.u4mess.ume.settings.WebSearchSettings
 import com.u4mess.ume.voice.VoiceChatSession
@@ -127,7 +128,16 @@ object ChatController {
 
     fun send(prompt: String, attachment: ChatAttachment? = null) {
         val text = prompt.trim().ifBlank {
-            if (attachment != null) "What's in this attachment?" else ""
+            when {
+                attachment?.imagePath != null -> when (LanguageSettings.mode.value) {
+                    LanguageMode.NEPALI_DEVANAGARI,
+                    LanguageMode.NEPALI_ROMANIZED,
+                    -> "यो तस्बिरको वर्णन गर्नुहोस्।"
+                    else -> "Describe this image."
+                }
+                attachment != null -> "What's in this attachment?"
+                else -> ""
+            }
         }
         if (text.isNotEmpty()) pending.trySend(IncomingPrompt(text, attachment))
     }
@@ -260,6 +270,13 @@ object ChatController {
             }
 
             when {
+                attachment?.imagePath != null -> {
+                    generateLocal(
+                        cleaned, assistantId, webBlock, attachmentBlock,
+                        attachment.imagePath,
+                    )
+                }
+
                 route == HybridRoute.CLOUD -> {
                     runCloudAction(cleaned, assistantId)
                 }
@@ -269,11 +286,17 @@ object ChatController {
                 }
 
                 mode.value == ChatMode.LOCAL -> {
-                    generateLocal(cleaned, assistantId, webBlock, attachmentBlock)
+                    generateLocal(
+                        cleaned, assistantId, webBlock, attachmentBlock,
+                        attachment?.imagePath,
+                    )
                 }
 
                 ModelManager.chatStatus.value is ModelStatus.Ready -> {
-                    generateLocal(cleaned, assistantId, webBlock, attachmentBlock)
+                    generateLocal(
+                        cleaned, assistantId, webBlock, attachmentBlock,
+                        attachment?.imagePath,
+                    )
                 }
 
                 CloudSettings.hasKey() -> {
@@ -308,7 +331,15 @@ object ChatController {
         assistantId: Long,
         webBlock: String? = null,
         attachmentBlock: String? = null,
+        imagePath: String? = null,
     ) {
+        if (imagePath != null && ModelManager.chatBackend.value != ChatBackend.LITERT_LM) {
+            replace(
+                assistantId,
+                "Image input needs Gemma 4 E2B (.litertlm). Load it in Models to use vision.",
+            )
+            return
+        }
         if (ModelManager.chatStatus.value !is ModelStatus.Ready) {
             replace(
                 assistantId,
@@ -328,7 +359,7 @@ object ChatController {
             .map { ChatTurn(it.role, it.text) }
 
         val speech = if (shouldSpeak()) SentenceSpeechBuffer() else null
-        ModelManager.generateChat(system, turns).collect { piece ->
+        ModelManager.generateChat(system, turns, imagePath).collect { piece ->
             append(assistantId, piece)
             speech?.append(piece)
         }

@@ -3,6 +3,7 @@ package com.u4mess.ume.brain
 import android.util.Log
 import com.u4mess.ume.BuildConfig
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
@@ -54,7 +55,11 @@ object LiteRtLmEngine {
         true
     }
 
-    fun generate(system: String, turns: List<ChatTurn>): Flow<String> = channelFlow {
+    fun generate(
+        system: String,
+        turns: List<ChatTurn>,
+        imagePath: String? = null,
+    ): Flow<String> = channelFlow {
         val pair = withContext(dispatcher) {
             closeConversationInternal()
             val currentEngine = engine ?: error("LiteRT-LM model is not loaded")
@@ -87,7 +92,14 @@ object LiteRtLmEngine {
         val prompt = pair.second
         try {
             withContext(dispatcher) {
-                activeConversation.sendMessageAsync(prompt).collect { message ->
+                val replies = if (imagePath != null) {
+                    activeConversation.sendMessageAsync(
+                        Contents.of(Content.ImageFile(imagePath), Content.Text(prompt)),
+                    )
+                } else {
+                    activeConversation.sendMessageAsync(prompt)
+                }
+                replies.collect { message ->
                     val text = message.toString()
                     if (text.isNotEmpty()) send(text)
                 }
@@ -119,6 +131,7 @@ object LiteRtLmEngine {
                 EngineConfig(
                     modelPath = modelPath,
                     backend = if (useGpu) Backend.GPU() else Backend.CPU(),
+                    visionBackend = if (useGpu) Backend.GPU() else Backend.CPU(),
                     cacheDir = cacheDir,
                 ),
             )

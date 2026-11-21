@@ -113,7 +113,8 @@ object ChatSessionStore {
                     .put("name", attachment.name)
                     .put("mimeType", attachment.mimeType)
                     .put("kind", attachment.kind.name)
-                    .put("text", attachment.text),
+                    .put("text", attachment.text)
+                    .put("imagePath", attachment.imagePath),
             )
         }
         agent?.let { agent ->
@@ -166,6 +167,7 @@ object ChatSessionStore {
                 kind = runCatching { ChatAttachmentKind.valueOf(it.optString("kind")) }
                     .getOrDefault(ChatAttachmentKind.TEXT),
                 text = it.optString("text"),
+                imagePath = it.optString("imagePath").ifBlank { null },
             )
         }
         val agent = optJSONObject("agent")?.let { source ->

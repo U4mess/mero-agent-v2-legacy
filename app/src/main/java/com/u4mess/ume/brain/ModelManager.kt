@@ -134,8 +134,12 @@ object ModelManager {
         chatStatus.value = ModelStatus.Unloaded
     }
 
-    fun generateChat(system: String, turns: List<ChatTurn>): Flow<String> = when (chatBackend.value) {
-        ChatBackend.LITERT_LM -> LiteRtLmEngine.generate(system, turns)
+    fun generateChat(
+        system: String,
+        turns: List<ChatTurn>,
+        imagePath: String? = null,
+    ): Flow<String> = when (chatBackend.value) {
+        ChatBackend.LITERT_LM -> LiteRtLmEngine.generate(system, turns, imagePath)
         ChatBackend.LLAMA_CPP -> LocalLlmEngine.generate(
             LocalLlmEngine.formatPrompt(system, turns),
         )
