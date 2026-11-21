@@ -36,6 +36,7 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.u4mess.ume.BuildConfig
 import com.u4mess.ume.MainActivity
 import com.u4mess.ume.R
 import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
@@ -289,7 +290,9 @@ class DynamicIslandService : Service() {
         runCatching {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(), types)
         }.onFailure { throwable ->
-            Log.e("UmeIsland", "Foreground service type rejected; retrying safe type", throwable)
+            if (BuildConfig.DEBUG) {
+                Log.e("UmeIsland", "Foreground service type rejected; retrying safe type", throwable)
+            }
             val safe = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             } else {
@@ -310,7 +313,9 @@ class DynamicIslandService : Service() {
         runCatching {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(), types)
         }.onFailure { throwable ->
-            Log.e("UmeIsland", "Could not switch to microphone foreground type", throwable)
+            if (BuildConfig.DEBUG) {
+                Log.e("UmeIsland", "Could not switch to microphone foreground type", throwable)
+            }
         }
     }
 

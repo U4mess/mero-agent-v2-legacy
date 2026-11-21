@@ -76,11 +76,13 @@ class ScreenReaderAccessibilityService : AccessibilityService() {
             }
             val added = runCatching { windowManager.addView(view, params) }
             if (added.isFailure) {
-                android.util.Log.e(
-                    "UmeRelay",
-                    "Unable to add island touch relay",
-                    added.exceptionOrNull(),
-                )
+                if (com.u4mess.ume.BuildConfig.DEBUG) {
+                    android.util.Log.e(
+                        "UmeRelay",
+                        "Unable to add island touch relay",
+                        added.exceptionOrNull(),
+                    )
+                }
                 return
             }
             islandTouchView = view

@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import com.u4mess.ume.BuildConfig
 import android.util.Log
 import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,7 +53,9 @@ object VoiceOutputManager {
                 tts?.setSpeechRate(_rate.value)
                 flushBuffered()
             } else {
-                Log.e("UmeVoice", "TextToSpeech initialization failed ($status)")
+                if (BuildConfig.DEBUG) {
+                    Log.e("UmeVoice", "TextToSpeech initialization failed ($status)")
+                }
                 ttsReady = false
                 bufferedSentences.clear()
                 _isSpeaking.value = false

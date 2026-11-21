@@ -16,6 +16,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
+import com.u4mess.ume.BuildConfig
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -135,7 +136,9 @@ object MediaDocumentIndexer {
                 else -> ""
             }
         }.getOrElse { throwable ->
-            Log.e("UmeMediaIndex", "Failed to extract attachment $uri", throwable)
+            if (BuildConfig.DEBUG) {
+                Log.e("UmeMediaIndex", "Failed to extract attachment $uri", throwable)
+            }
             ""
         }
     }
@@ -168,7 +171,9 @@ object MediaDocumentIndexer {
         val text = try {
             if (isPdf) extractPdfText(uri) else extractImageText(uri)
         } catch (throwable: Throwable) {
-            Log.e("UmeMediaIndex", "Failed to extract $uri", throwable)
+            if (BuildConfig.DEBUG) {
+                Log.e("UmeMediaIndex", "Failed to extract $uri", throwable)
+            }
             null
         }.orEmpty().trim()
 
@@ -191,7 +196,9 @@ object MediaDocumentIndexer {
             markIndexed(uri)
             true
         }.getOrElse { throwable ->
-            Log.e("UmeMediaIndex", "Failed to save $uri", throwable)
+            if (BuildConfig.DEBUG) {
+                Log.e("UmeMediaIndex", "Failed to save $uri", throwable)
+            }
             false
         }
     }
@@ -207,7 +214,9 @@ object MediaDocumentIndexer {
                 imageObserver,
             )
             any = true
-        }.onFailure { Log.e("UmeMediaIndex", "Image observer failed", it) }
+        }.onFailure {
+            if (BuildConfig.DEBUG) Log.e("UmeMediaIndex", "Image observer failed", it)
+        }
 
         runCatching {
             resolver.registerContentObserver(
@@ -223,10 +232,12 @@ object MediaDocumentIndexer {
                 )
             }
             any = true
-        }.onFailure { Log.e("UmeMediaIndex", "File observer failed", it) }
+        }.onFailure {
+            if (BuildConfig.DEBUG) Log.e("UmeMediaIndex", "File observer failed", it)
+        }
 
         registered = any
-        if (any) Log.i("UmeMediaIndex", "Media observers registered")
+        if (any && BuildConfig.DEBUG) Log.i("UmeMediaIndex", "Media observers registered")
     }
 
     private fun stopObservers() {
@@ -360,7 +371,9 @@ object MediaDocumentIndexer {
     private fun ensurePdfInitialized() {
         if (pdfInitialized.compareAndSet(false, true)) {
             runCatching { PDFBoxResourceLoader.init(appContext) }
-                .onFailure { Log.e("UmeMediaIndex", "PDFBox init failed", it) }
+                .onFailure {
+                    if (BuildConfig.DEBUG) Log.e("UmeMediaIndex", "PDFBox init failed", it)
+                }
         }
     }
 
