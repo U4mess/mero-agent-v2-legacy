@@ -11,6 +11,7 @@ import com.u4mess.ume.memory.MemoryEntity
 import com.u4mess.ume.memory.MemoryRepository
 import com.u4mess.ume.memory.MyObjectBox
 import com.u4mess.ume.memory.NightlyConsolidator
+import com.u4mess.ume.service.IslandSettings
 import com.u4mess.ume.settings.CloudSettings
 import io.objectbox.BoxStore
 import java.util.concurrent.TimeUnit
@@ -29,6 +30,7 @@ class UmeApplication : Application() {
 
         ModelManager.init(this)
         CloudSettings.init(this)
+        IslandSettings.init(this)
         ChatController.start(this, memoryRepository)
         scheduleNightlyConsolidation()
     }

@@ -1,5 +1,6 @@
 package com.u4mess.ume.service
 
+import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -15,6 +16,7 @@ import android.view.MotionEvent
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
+import android.view.animation.DecelerateInterpolator
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,16 +32,25 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.u4mess.ume.MainActivity
 import com.u4mess.ume.R
+import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
 import com.u4mess.ume.ui.UmeTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 
 class DynamicIslandService : Service() {
 
     private val expanded = mutableStateOf(false)
     private val lifecycleOwner = ServiceLifecycleOwner()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private lateinit var windowManager: WindowManager
     private lateinit var islandView: ComposeView
     private lateinit var layoutParams: WindowManager.LayoutParams
+    private var yAnimator: ValueAnimator? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -91,15 +102,41 @@ class DynamicIslandService : Service() {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            y = topOffset()
+            y = collapsedY()
             title = "Ume Island"
-            layoutInDisplayCutoutMode =
+            layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            } else {
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
         }
 
         lifecycleOwner.start()
         lifecycleOwner.resume()
         runCatching { windowManager.addView(islandView, layoutParams) }.onFailure { stopSelf() }
+
+        updateTouchRelay()
+        scope.launch {
+            IslandSettings.yOffsetDp.collect {
+                if (!expanded.value && ::islandView.isInitialized && islandView.isAttachedToWindow) {
+                    layoutParams.y = collapsedY()
+                    updateLayout()
+                    updateTouchRelay()
+                }
+            }
+        }
+        scope.launch {
+            IslandAgent.status.collect { updateTouchRelay(it) }
+        }
+        scope.launch {
+            ScreenReaderAccessibilityService.connected.collect {
+                if (!expanded.value) {
+                    layoutParams.y = collapsedY()
+                    updateLayout()
+                    updateTouchRelay()
+                }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_NOT_STICKY
@@ -107,6 +144,9 @@ class DynamicIslandService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        scope.cancel()
+        yAnimator?.cancel()
+        IslandTouchRelay.hide()
         if (::islandView.isInitialized && islandView.isAttachedToWindow) {
             getSystemService(InputMethodManager::class.java)
                 .hideSoftInputFromWindow(islandView.windowToken, 0)
@@ -128,7 +168,8 @@ class DynamicIslandService : Service() {
         } else {
             WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
         }
-        windowManager.updateViewLayout(islandView, layoutParams)
+        animateYTo(if (value) expandedY() else collapsedY())
+        updateTouchRelay()
 
         if (value) {
             islandView.post { islandView.requestFocus() }
@@ -141,17 +182,68 @@ class DynamicIslandService : Service() {
         }
     }
 
-    private fun topOffset(): Int {
-        val statusBar = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            windowManager.currentWindowMetrics
-                .windowInsets
-                .getInsetsIgnoringVisibility(WindowInsets.Type.statusBars())
-                .top
+    private fun updateTouchRelay(status: AgentStatus? = IslandAgent.status.value) {
+        if (!::islandView.isInitialized) return
+
+        val statusMode = status != null
+        IslandTouchRelay.update(
+            visible = !expanded.value,
+            offsetDp = IslandSettings.yOffsetDp.value,
+            widthDp = if (statusMode) resources.configuration.screenWidthDp - 72 else 110,
+            heightDp = if (statusMode) 40 else 28,
+            onClick = {
+                when {
+                    status?.active == true -> IslandAgent.stop()
+                    status == null -> setExpanded(true)
+                }
+            },
+        )
+    }
+
+    private fun collapsedY(): Int =
+        if (ScreenReaderAccessibilityService.instance == null) {
+            expandedY()
         } else {
-            val id = resources.getIdentifier("status_bar_height", "dimen", "android")
-            if (id > 0) resources.getDimensionPixelSize(id) else 0
+            dpToPx(IslandSettings.yOffsetDp.value)
         }
-        return statusBar + (8 * resources.displayMetrics.density).toInt()
+
+    private fun expandedY(): Int = statusBarHeightPx() + dpToPx(8)
+
+    private fun statusBarHeightPx(): Int = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        windowManager.currentWindowMetrics
+            .windowInsets
+            .getInsetsIgnoringVisibility(WindowInsets.Type.statusBars())
+            .top
+    } else {
+        val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+        if (id > 0) resources.getDimensionPixelSize(id) else 0
+    }
+
+    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
+
+    private fun animateYTo(target: Int) {
+        yAnimator?.cancel()
+        val start = layoutParams.y
+        if (start == target) {
+            layoutParams.y = target
+            updateLayout()
+            return
+        }
+        yAnimator = ValueAnimator.ofInt(start, target).apply {
+            duration = 220L
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { animator ->
+                layoutParams.y = animator.animatedValue as Int
+                updateLayout()
+            }
+            start()
+        }
+    }
+
+    private fun updateLayout() {
+        if (::islandView.isInitialized && islandView.isAttachedToWindow) {
+            runCatching { windowManager.updateViewLayout(islandView, layoutParams) }
+        }
     }
 
     private fun buildNotification(): Notification {
@@ -187,11 +279,13 @@ class DynamicIslandService : Service() {
         val COLLAPSED_FLAGS = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
             WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
 
         val EXPANDED_FLAGS = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
             WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
     }
 }
 

@@ -69,7 +69,7 @@ internal fun DynamicIsland(
         targetValue = when {
             statusMode -> (screenWidth - 72).dp
             expanded -> (screenWidth - 32).dp
-            else -> 96.dp
+            else -> 110.dp
         },
         animationSpec = tween(260, easing = FastOutSlowInEasing),
         label = "islandWidth",
@@ -78,7 +78,7 @@ internal fun DynamicIsland(
         targetValue = when {
             statusMode -> 40.dp
             expanded -> 52.dp
-            else -> 34.dp
+            else -> 28.dp
         },
         animationSpec = tween(260, easing = FastOutSlowInEasing),
         label = "islandHeight",
@@ -87,7 +87,7 @@ internal fun DynamicIsland(
         targetValue = when {
             statusMode -> 20.dp
             expanded -> 26.dp
-            else -> 17.dp
+            else -> 14.dp
         },
         animationSpec = tween(260, easing = FastOutSlowInEasing),
         label = "islandCorner",

@@ -208,8 +208,14 @@ object ChatController {
 
     private suspend fun buildSystemPrompt(query: String): String {
         val memories = retrieveMemories(query)
+        val modelName = ModelManager.chatSelection.value?.displayName
         return buildString {
-            append("You are Ume, a private on-device assistant. Answer directly and concisely.")
+            if (modelName != null) {
+                append("You are Ume, a private on-device AI assistant running locally via $modelName.")
+            } else {
+                append("You are Ume, a private on-device AI assistant running locally.")
+            }
+            append(" Answer directly and concisely.")
             if (memories.isNotEmpty()) {
                 append("\n\nRelevant memories from this device:\n")
                 memories.forEach { memory ->
@@ -243,7 +249,7 @@ object ChatController {
         withContext(Dispatchers.IO) {
             repository.insert(
                 source = MemorySource.ACTION,
-                packageName = "",
+                packageName = "Ume Agent",
                 title = "Action: ${goal.take(60)}",
                 content = buildString {
                     append(summary)

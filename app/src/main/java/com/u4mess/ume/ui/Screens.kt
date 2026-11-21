@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -33,6 +34,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -42,6 +45,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,12 +82,14 @@ import com.u4mess.ume.memory.MemorySource
 import com.u4mess.ume.memory.NightlyConsolidator
 import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
 import com.u4mess.ume.service.DynamicIslandService
+import com.u4mess.ume.service.IslandSettings
 import com.u4mess.ume.service.IslandState
 import com.u4mess.ume.settings.CloudSettings
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -161,13 +167,29 @@ fun MemoryScreen() {
         Column(Modifier.padding(horizontal = 20.dp)) {
             MemorySearchField(keyword, onValueChange = { keyword = it })
             Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterPill("All", sourceFilter.isEmpty()) { sourceFilter = "" }
-                FilterPill("Notifications", sourceFilter == MemorySource.NOTIFICATION) {
-                    sourceFilter = MemorySource.NOTIFICATION
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    FilterPill("All", sourceFilter.isEmpty()) { sourceFilter = "" }
                 }
-                FilterPill("Screen", sourceFilter == MemorySource.SCREEN) {
-                    sourceFilter = MemorySource.SCREEN
+                item {
+                    FilterPill("Notifications", sourceFilter == MemorySource.NOTIFICATION) {
+                        sourceFilter = MemorySource.NOTIFICATION
+                    }
+                }
+                item {
+                    FilterPill("Screen", sourceFilter == MemorySource.SCREEN) {
+                        sourceFilter = MemorySource.SCREEN
+                    }
+                }
+                item {
+                    FilterPill("Actions", sourceFilter == MemorySource.ACTION) {
+                        sourceFilter = MemorySource.ACTION
+                    }
+                }
+                item {
+                    FilterPill("Summaries", sourceFilter == MemorySource.SUMMARY) {
+                        sourceFilter = MemorySource.SUMMARY
+                    }
                 }
             }
         }
@@ -236,6 +258,7 @@ fun SettingsScreen() {
     val cloudModel by CloudSettings.model.collectAsState()
     var apiKey by remember { mutableStateOf(CloudSettings.apiKey().orEmpty()) }
     var keySaved by remember { mutableStateOf(CloudSettings.hasKey()) }
+    var yOffset by remember { mutableFloatStateOf(IslandSettings.yOffsetDp.value.toFloat()) }
 
     Column(
         Modifier
@@ -317,6 +340,49 @@ fun SettingsScreen() {
                     ),
                 )
             }
+
+            HorizontalDivider(color = Border, thickness = 1.dp)
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 10.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Dynamic Island Y-Offset",
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "${yOffset.roundToInt()} dp",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                Slider(
+                    value = yOffset,
+                    onValueChange = {
+                        yOffset = it
+                        IslandSettings.previewYOffset(it.roundToInt())
+                    },
+                    onValueChangeFinished = {
+                        IslandSettings.persistYOffset(yOffset.roundToInt())
+                    },
+                    valueRange = 0f..IslandSettings.MAX_Y_OFFSET_DP.toFloat(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = TextPrimary,
+                        activeTrackColor = TextPrimary,
+                        inactiveTrackColor = Border,
+                        activeTickColor = TextPrimary,
+                        inactiveTickColor = Border,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                )
+            }
         }
 
         Spacer(Modifier.height(12.dp))
@@ -354,10 +420,7 @@ fun SettingsScreen() {
                 ) {
                     BasicTextField(
                         value = apiKey,
-                        onValueChange = {
-                            apiKey = it
-                            keySaved = false
-                        },
+                        onValueChange = { apiKey = it },
                         singleLine = true,
                         textStyle = TextStyle(color = TextPrimary, fontSize = 13.sp),
                         cursorBrush = SolidColor(TextPrimary),
@@ -394,6 +457,23 @@ fun SettingsScreen() {
                         }
                         .padding(horizontal = 14.dp, vertical = 9.dp),
                 )
+                if (keySaved) {
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "Clear",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                CloudSettings.saveApiKey("")
+                                apiKey = ""
+                                keySaved = false
+                                Toast.makeText(context, "API key cleared", Toast.LENGTH_SHORT).show()
+                            }
+                            .padding(horizontal = 8.dp, vertical = 9.dp),
+                    )
+                }
             }
 
             Text(
@@ -407,21 +487,26 @@ fun SettingsScreen() {
                 modifier = Modifier.padding(start = 20.dp, top = 6.dp),
             )
 
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 20.dp, end = 20.dp, top = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "Model",
-                    color = TextSecondary,
-                    fontSize = 12.sp,
-                    modifier = Modifier.width(52.dp),
-                )
-                CloudSettings.models.forEach { option ->
-                    FilterPill(option, cloudModel == option) { CloudSettings.setModel(option) }
-                    Spacer(Modifier.width(8.dp))
+                Text("Model", color = TextSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CloudSettings.models.forEach { option ->
+                        ModelOptionPill(
+                            label = option,
+                            selected = cloudModel == option,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            CloudSettings.setModel(option)
+                        }
+                    }
                 }
             }
 
@@ -548,6 +633,36 @@ private fun MemorySearchField(value: String, onValueChange: (String) -> Unit) {
 }
 
 @Composable
+private fun ModelOptionPill(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .height(34.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) TextPrimary else Elevated)
+            .border(1.dp, if (selected) TextPrimary else Border, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = if (selected) Black else TextSecondary,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
 private fun FilterPill(label: String, selected: Boolean, onClick: () -> Unit) {
     Text(
         text = label,
@@ -634,7 +749,12 @@ private fun MemoryCard(memory: MemoryEntity, onDelete: () -> Unit) {
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text = memory.packageName.ifBlank { "unknown" },
+                text = memory.packageName.ifBlank {
+                    when (memory.source) {
+                        MemorySource.ACTION, MemorySource.SUMMARY -> "Ume Agent"
+                        else -> "unknown"
+                    }
+                },
                 color = TextSecondary,
                 fontSize = 11.sp,
                 maxLines = 1,

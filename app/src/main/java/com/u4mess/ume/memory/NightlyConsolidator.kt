@@ -49,7 +49,7 @@ class NightlyConsolidator(
                 withContext(Dispatchers.IO) {
                     repository.insert(
                         source = MemorySource.SUMMARY,
-                        packageName = "",
+                        packageName = "Ume Agent",
                         title = "Daily summary",
                         content = text,
                     )
