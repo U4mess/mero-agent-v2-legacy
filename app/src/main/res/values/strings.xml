@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Ume</string>
+    <string name="notification_channel">Ume floating island</string>
+    <string name="notification_title">Ume is ready</string>
+    <string name="notification_text">Tap to open Ume</string>
+</resources>
