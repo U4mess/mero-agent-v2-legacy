@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -6,6 +7,27 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("io.objectbox")
 }
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.isFile) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+fun signingValue(name: String): String? =
+    keystoreProperties.getProperty(name)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(name)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = signingValue("KEYSTORE_FILE")
+    ?.let { rootProject.file(it) }
+val releaseStorePassword = signingValue("KEYSTORE_PASSWORD")
+val releaseKeyAlias = signingValue("KEY_ALIAS")
+val releaseKeyPassword = signingValue("KEY_PASSWORD")
+val hasReleaseSigning = releaseStoreFile?.isFile == true &&
+    releaseStorePassword != null &&
+    releaseKeyAlias != null &&
+    releaseKeyPassword != null
 
 android {
     namespace = "com.u4mess.ume"
@@ -16,8 +38,8 @@ android {
         applicationId = "com.u4mess.ume"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.7"
+        versionCode = 2
+        versionName = "1.9"
 
         ndk {
             abiFilters += "arm64-v8a"
@@ -45,6 +67,31 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            isDebuggable = false
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
     }
 }
 
