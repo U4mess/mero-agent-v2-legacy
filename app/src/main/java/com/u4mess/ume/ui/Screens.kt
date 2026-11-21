@@ -117,6 +117,7 @@ import com.u4mess.ume.settings.CloudProvider
 import com.u4mess.ume.settings.CloudSettings
 import com.u4mess.ume.settings.ThemeMode
 import com.u4mess.ume.settings.ThemeSettings
+import com.u4mess.ume.settings.WebSearchSettings
 import com.u4mess.ume.voice.VoiceOutputManager
 import java.time.Instant
 import java.time.LocalDate
@@ -375,6 +376,8 @@ fun SettingsScreen() {
     val mediaIndexEnabled by MediaDocumentIndexer.enabled.collectAsState()
     val voiceReplies by VoiceOutputManager.enabled.collectAsState()
     val speechRate by VoiceOutputManager.rate.collectAsState()
+    var braveKey by remember { mutableStateOf(WebSearchSettings.apiKey().orEmpty()) }
+    var braveSaved by remember { mutableStateOf(WebSearchSettings.hasKey()) }
 
     val overlayGranted = remember(refresh) { Settings.canDrawOverlays(context) }
     val microphoneGranted = remember(refresh) {
@@ -802,6 +805,100 @@ fun SettingsScreen() {
                         .padding(top = 2.dp),
                 )
             }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .shadow(3.dp, RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(24.dp))
+                .background(Elevated)
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+        ) {
+            Text(
+                text = "Web Search",
+                color = TextSecondary,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 12.dp, top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Black)
+                        .border(1.dp, Border, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BasicTextField(
+                        value = braveKey,
+                        onValueChange = { braveKey = it },
+                        singleLine = true,
+                        textStyle = TextStyle(color = TextPrimary, fontSize = 12.sp),
+                        cursorBrush = SolidColor(TextPrimary),
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { innerTextField ->
+                            Box {
+                                if (braveKey.isEmpty()) {
+                                    Text(
+                                        "Brave Search API key (optional)",
+                                        color = TextSecondary,
+                                        fontSize = 11.sp,
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        },
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Save",
+                    color = if (braveKey.isNotBlank()) TextPrimary else TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(enabled = braveKey.isNotBlank()) {
+                            WebSearchSettings.saveApiKey(braveKey)
+                            braveSaved = WebSearchSettings.hasKey()
+                        }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                )
+                if (braveSaved) {
+                    Text(
+                        text = "Clear",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                WebSearchSettings.saveApiKey("")
+                                braveKey = ""
+                                braveSaved = false
+                            }
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                    )
+                }
+            }
+            Text(
+                text = "Uses Brave Search API when set; falls back to DuckDuckGo automatically.",
+                color = TextSecondary,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 16.dp),
+            )
         }
 
         Spacer(Modifier.height(12.dp))

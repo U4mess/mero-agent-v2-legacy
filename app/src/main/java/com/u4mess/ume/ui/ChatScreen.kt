@@ -65,6 +65,7 @@ import com.u4mess.ume.brain.ChatController
 import com.u4mess.ume.brain.ChatMode
 import com.u4mess.ume.brain.ChatRole
 import com.u4mess.ume.brain.UiAgentResult
+import com.u4mess.ume.net.WebResult
 import com.u4mess.ume.service.ApprovalRequest
 import com.u4mess.ume.service.IslandAgent
 import com.u4mess.ume.voice.VoiceChatSession
@@ -103,6 +104,7 @@ fun ChatScreen() {
     val messages by ChatController.messages.collectAsState()
     val generating by ChatController.generating.collectAsState()
     val mode by ChatController.mode.collectAsState()
+    val webEnabled by ChatController.webEnabled.collectAsState()
     val agentStatus by IslandAgent.status.collectAsState()
     val approval by IslandAgent.approval.collectAsState()
     val listening by VoiceInputManager.isListening.collectAsState()
@@ -114,6 +116,7 @@ fun ChatScreen() {
     val context = LocalContext.current
     var input by rememberSaveable { mutableStateOf("") }
     var showVoiceChat by rememberSaveable { mutableStateOf(false) }
+    var selectedWebSources by remember { mutableStateOf<List<WebResult>?>(null) }
     val listState = rememberLazyListState()
     var previousMessageCount by remember { mutableIntStateOf(0) }
     val inputFocus = remember { FocusRequester() }
@@ -219,7 +222,9 @@ fun ChatScreen() {
             subtitle = moodText,
             generating = generating,
             mode = mode,
+            webEnabled = webEnabled,
             onModeChange = ChatController::setMode,
+            onToggleWeb = { ChatController.setWebEnabled(!webEnabled) },
             onTalk = { showVoiceChat = true },
             onStop = { ChatController.stop() },
         )
@@ -245,7 +250,10 @@ fun ChatScreen() {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(messages, key = { it.id }) { message ->
-                    MessageBubble(message)
+                    MessageBubble(
+                        message = message,
+                        onOpenWebSources = { sources -> selectedWebSources = sources },
+                    )
                 }
             }
         }
@@ -279,6 +287,10 @@ fun ChatScreen() {
     if (showVoiceChat) {
         VoiceChatSheet(onDismiss = { showVoiceChat = false })
     }
+
+    selectedWebSources?.let { sources ->
+        WebSourcesSheet(sources) { selectedWebSources = null }
+    }
 }
 
 @Composable
@@ -287,7 +299,9 @@ private fun ChatHeader(
     subtitle: String,
     generating: Boolean,
     mode: ChatMode,
+    webEnabled: Boolean,
     onModeChange: (ChatMode) -> Unit,
+    onToggleWeb: () -> Unit,
     onTalk: () -> Unit,
     onStop: () -> Unit,
 ) {
@@ -347,6 +361,11 @@ private fun ChatHeader(
                 )
                 Spacer(Modifier.width(5.dp))
             }
+            ChatModePill(
+                label = "Web",
+                selected = webEnabled,
+                onClick = onToggleWeb,
+            )
         }
     }
 }
@@ -402,7 +421,10 @@ private fun ChatModePill(label: String, selected: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
-private fun MessageBubble(message: ChatController.Message) {
+private fun MessageBubble(
+    message: ChatController.Message,
+    onOpenWebSources: (List<WebResult>) -> Unit,
+) {
     val dark = UmeDark
     var agentExpanded by rememberSaveable { mutableStateOf(false) }
 
@@ -491,6 +513,9 @@ private fun MessageBubble(message: ChatController.Message) {
                 ) {
                     if (message.agent != null) {
                         AgentStatusCard(message.agent, expanded = agentExpanded)
+                        if (message.webSources.isNotEmpty()) {
+                            WebSourcesBadge(message.webSources, onOpenWebSources)
+                        }
                         Spacer(Modifier.height(2.dp))
                         Text(
                             text = formatChatTime(message.createdAt),
@@ -503,6 +528,10 @@ private fun MessageBubble(message: ChatController.Message) {
                             message.text.isBlank() && message.streaming -> "Thinking..."
                             message.streaming -> message.text + "|"
                             else -> message.text
+                        }
+                        if (message.webSources.isNotEmpty()) {
+                            WebSourcesBadge(message.webSources, onOpenWebSources)
+                            Spacer(Modifier.height(4.dp))
                         }
                         Row(verticalAlignment = Alignment.Bottom) {
                             Text(
@@ -528,6 +557,24 @@ private fun MessageBubble(message: ChatController.Message) {
             }
         }
     }
+}
+
+@Composable
+private fun WebSourcesBadge(
+    sources: List<WebResult>,
+    onOpen: (List<WebResult>) -> Unit,
+) {
+    Text(
+        text = "WEB \u00B7 ${sources.size} sources",
+        color = WarmAccent,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.Medium,
+        letterSpacing = 0.5.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onOpen(sources) }
+            .padding(vertical = 2.dp, horizontal = 2.dp),
+    )
 }
 
 @Composable

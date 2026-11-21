@@ -68,4 +68,5 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.5")
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

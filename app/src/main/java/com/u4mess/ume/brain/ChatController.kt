@@ -4,10 +4,13 @@ import android.content.Context
 import com.u4mess.ume.memory.MemoryEntity
 import com.u4mess.ume.memory.MemoryRepository
 import com.u4mess.ume.memory.MemorySource
+import com.u4mess.ume.net.WebResult
+import com.u4mess.ume.net.WebSearchClient
 import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
 import com.u4mess.ume.service.IslandAgent
 import com.u4mess.ume.service.PromptInbox
 import com.u4mess.ume.settings.CloudSettings
+import com.u4mess.ume.settings.WebSearchSettings
 import com.u4mess.ume.voice.VoiceChatSession
 import com.u4mess.ume.voice.VoiceOutputManager
 import kotlinx.coroutines.CancellationException
@@ -40,6 +43,7 @@ object ChatController {
         val createdAt: Long = System.currentTimeMillis(),
         val proactive: Boolean = false,
         val agent: UiAgentResult? = null,
+        val webSources: List<WebResult> = emptyList(),
     )
 
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
@@ -49,6 +53,7 @@ object ChatController {
     val generating: StateFlow<Boolean> = _generating.asStateFlow()
 
     val mode = MutableStateFlow(ChatMode.AUTO)
+    val webEnabled = MutableStateFlow(false)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val pending = Channel<String>(Channel.UNLIMITED)
@@ -93,6 +98,10 @@ object ChatController {
         mode.value = value
     }
 
+    fun setWebEnabled(value: Boolean) {
+        webEnabled.value = value
+    }
+
     fun postProactiveSummary(text: String) {
         val summary = text.trim()
         if (summary.isEmpty()) return
@@ -122,26 +131,43 @@ object ChatController {
         _messages.update { it + Message(assistantId, ChatRole.ASSISTANT, "", streaming = true) }
 
         try {
-            val cleaned = HybridRouter.clean(prompt)
+            val raw = prompt.trim()
+            val explicitWeb = raw.startsWith("/web ", ignoreCase = true)
+            val chatPrompt = if (explicitWeb) raw.substring(5).trim() else raw
+            val cleaned = HybridRouter.clean(chatPrompt)
+            val route = HybridRouter.route(if (explicitWeb) chatPrompt else raw)
+            val useWeb = route != HybridRoute.CLOUD && (explicitWeb || webEnabled.value)
+
+            var webBlock: String? = null
+            if (useWeb) {
+                replace(assistantId, "Searching web...")
+                val results = WebSearchClient.search(cleaned, WebSearchSettings.apiKey())
+                if (results.isNotEmpty()) {
+                    webBlock = WebSearchClient.formatForPrompt(results)
+                    setWebSources(assistantId, results)
+                }
+                replace(assistantId, "")
+            }
+
             when {
-                HybridRouter.route(prompt) == HybridRoute.CLOUD -> {
+                route == HybridRoute.CLOUD -> {
                     runCloudAction(cleaned, assistantId)
                 }
 
                 mode.value == ChatMode.CLOUD -> {
-                    generateCloudChat(cleaned, assistantId)
+                    generateCloudChat(cleaned, assistantId, webBlock)
                 }
 
                 mode.value == ChatMode.LOCAL -> {
-                    generateLocal(cleaned, assistantId)
+                    generateLocal(cleaned, assistantId, webBlock)
                 }
 
                 LocalLlmEngine.chatStatus.value is ModelStatus.Ready -> {
-                    generateLocal(cleaned, assistantId)
+                    generateLocal(cleaned, assistantId, webBlock)
                 }
 
                 CloudSettings.hasKey() -> {
-                    generateCloudChat(cleaned, assistantId)
+                    generateCloudChat(cleaned, assistantId, webBlock)
                 }
 
                 else -> {
@@ -166,7 +192,7 @@ object ChatController {
         }
     }
 
-    private suspend fun generateLocal(prompt: String, assistantId: Long) {
+    private suspend fun generateLocal(prompt: String, assistantId: Long, webBlock: String? = null) {
         if (LocalLlmEngine.chatStatus.value !is ModelStatus.Ready) {
             replace(
                 assistantId,
@@ -175,7 +201,7 @@ object ChatController {
             return
         }
 
-        val system = buildSystemPrompt(prompt)
+        val system = buildSystemPrompt(prompt, webBlock = webBlock)
         val turns = _messages.value
             .filter { it.id != assistantId && it.text.isNotBlank() }
             .takeLast(8)
@@ -194,7 +220,7 @@ object ChatController {
         }
     }
 
-    private suspend fun generateCloudChat(prompt: String, assistantId: Long) {
+    private suspend fun generateCloudChat(prompt: String, assistantId: Long, webBlock: String? = null) {
         if (prompt.isBlank()) {
             replace(assistantId, "Tell me what to do, or just say hello.")
             return
@@ -209,7 +235,7 @@ object ChatController {
             return
         }
 
-        val system = buildSystemPrompt(prompt, local = false)
+        val system = buildSystemPrompt(prompt, local = false, webBlock = webBlock)
         val turns = _messages.value
             .filter { it.id != assistantId && it.text.isNotBlank() }
             .takeLast(8)
@@ -318,7 +344,11 @@ object ChatController {
         }
     }
 
-    private suspend fun buildSystemPrompt(query: String, local: Boolean = true): String {
+    private suspend fun buildSystemPrompt(
+        query: String,
+        local: Boolean = true,
+        webBlock: String? = null,
+    ): String {
         val memories = retrieveMemories(query)
         val modelName = ModelManager.chatSelection.value?.displayName
         return buildString {
@@ -340,6 +370,14 @@ object ChatController {
                     append(memory.content.replace('\n', ' ').take(280))
                     append('\n')
                 }
+            }
+            if (webBlock != null) {
+                append("\n\n")
+                append(webBlock)
+                append(
+                    "\nAnswer the user's question concisely using the live results above. " +
+                        "Do not say you lack internet access.",
+                )
             }
         }
     }
@@ -448,6 +486,12 @@ object ChatController {
     private fun setAgent(id: Long, result: UiAgentResult) {
         _messages.update { list ->
             list.map { if (it.id == id) it.copy(agent = result) else it }
+        }
+    }
+
+    private fun setWebSources(id: Long, sources: List<WebResult>) {
+        _messages.update { list ->
+            list.map { if (it.id == id) it.copy(webSources = sources) else it }
         }
     }
 

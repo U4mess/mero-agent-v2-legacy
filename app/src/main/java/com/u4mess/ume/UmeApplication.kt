@@ -15,6 +15,7 @@ import com.u4mess.ume.sensors.MediaDocumentIndexer
 import com.u4mess.ume.service.IslandSettings
 import com.u4mess.ume.settings.CloudSettings
 import com.u4mess.ume.settings.ThemeSettings
+import com.u4mess.ume.settings.WebSearchSettings
 import com.u4mess.ume.voice.VoiceInputManager
 import com.u4mess.ume.voice.VoiceOutputManager
 import io.objectbox.BoxStore
@@ -39,6 +40,7 @@ class UmeApplication : Application() {
 
         ModelManager.init(this)
         CloudSettings.init(this)
+        WebSearchSettings.init(this)
         ThemeSettings.init(this)
         IslandSettings.init(this)
         VoiceInputManager.init(this)
