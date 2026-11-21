@@ -43,6 +43,12 @@ class MemoryRepository(private val box: Box<MemoryEntity>) {
             .build()
             .use { it.find(0L, limit.toLong()) }
 
+    fun recentSince(since: Long, limit: Int = 200): List<MemoryEntity> =
+        box.query(MemoryEntity_.timestamp.greater(since))
+            .orderDesc(MemoryEntity_.timestamp)
+            .build()
+            .use { it.find(0L, limit.toLong()) }
+
     fun search(keyword: String = "", source: String? = null, limit: Int = 200): List<MemoryEntity> {
         var condition: QueryCondition<MemoryEntity>? = null
         if (!source.isNullOrBlank()) {
@@ -65,6 +71,13 @@ class MemoryRepository(private val box: Box<MemoryEntity>) {
     fun delete(id: Long) {
         box.remove(id)
         _revisions.update { it + 1 }
+    }
+
+    /** Stores an embedding without bumping revisions: embeddings are not rendered in the UI. */
+    fun updateEmbedding(id: Long, embedding: FloatArray) {
+        val entity = box.get(id) ?: return
+        entity.embedding = embedding
+        box.put(entity)
     }
 
     fun nearestNeighbors(vector: FloatArray, limit: Int = 10): List<MemoryEntity> {

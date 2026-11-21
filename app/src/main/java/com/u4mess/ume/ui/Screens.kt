@@ -62,16 +62,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.u4mess.ume.UmeApplication
+import com.u4mess.ume.brain.LocalLlmEngine
+import com.u4mess.ume.brain.ModelStatus
 import com.u4mess.ume.memory.MemoryEntity
 import com.u4mess.ume.memory.MemorySource
+import com.u4mess.ume.memory.NightlyConsolidator
 import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
 import com.u4mess.ume.service.DynamicIslandService
 import com.u4mess.ume.service.IslandState
-import com.u4mess.ume.service.PromptInbox
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -79,42 +83,6 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-@Composable
-fun ChatScreen() {
-    val prompts by PromptInbox.prompts.collectAsState()
-    Column(Modifier.fillMaxSize()) {
-        ScreenHeader("Chat")
-        if (prompts.isEmpty()) {
-            EmptyState(
-                title = "Nothing here yet",
-                body = "Tap the Ume pill anywhere on screen to send your first prompt.",
-                modifier = Modifier.weight(1f),
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(prompts) { prompt ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        Text(
-                            text = prompt,
-                            color = TextPrimary,
-                            fontSize = 14.sp,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(Elevated)
-                                .border(1.dp, Border, RoundedCornerShape(18.dp))
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 fun MemoryScreen() {
@@ -144,12 +112,16 @@ fun MemoryScreen() {
             } else {
                 val packageName = ScreenReaderAccessibilityService.currentPackageName().orEmpty()
                 scope.launch(Dispatchers.IO) {
-                    repository.insert(
+                    val id = repository.insert(
                         source = MemorySource.SCREEN,
                         packageName = packageName,
                         title = "Screen capture",
                         content = json,
                     )
+                    if (LocalLlmEngine.embeddingStatus.value is ModelStatus.Ready) {
+                        LocalLlmEngine.embed("Screen capture $packageName\n${json.take(4000)}")
+                            ?.let { repository.updateEmbedding(id, it) }
+                    }
                 }
                 Toast.makeText(context, "Screen captured", Toast.LENGTH_SHORT).show()
             }
@@ -225,18 +197,6 @@ fun MemoryScreen() {
                 }
             }
         }
-    }
-}
-
-@Composable
-fun ModelsScreen() {
-    Column(Modifier.fillMaxSize()) {
-        ScreenHeader("Models")
-        EmptyState(
-            title = "No models installed",
-            body = "Local models will show up here. Ume runs them entirely on this device.",
-            modifier = Modifier.weight(1f),
-        )
     }
 }
 
@@ -348,6 +308,48 @@ fun SettingsScreen() {
                         uncheckedBorderColor = Border,
                     ),
                 )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Elevated)
+                .border(1.dp, Border, RoundedCornerShape(20.dp)),
+        ) {
+            Text(
+                text = "Maintenance",
+                color = TextSecondary,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Memory consolidation", color = TextPrimary, fontSize = 15.sp)
+                    Text(
+                        text = "Summarize the last 24 hours into one memory.",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        WorkManager.getInstance(context)
+                            .enqueue(OneTimeWorkRequestBuilder<NightlyConsolidator>().build())
+                        Toast.makeText(context, "Consolidation queued", Toast.LENGTH_SHORT).show()
+                    },
+                ) {
+                    Text("Run now", color = TextPrimary, fontSize = 13.sp)
+                }
             }
         }
 
@@ -503,7 +505,7 @@ private fun MemoryCard(memory: MemoryEntity, onDelete: () -> Unit) {
 }
 
 @Composable
-private fun ScreenHeader(title: String, trailing: (@Composable () -> Unit)? = null) {
+internal fun ScreenHeader(title: String, trailing: (@Composable () -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -521,7 +523,7 @@ private fun ScreenHeader(title: String, trailing: (@Composable () -> Unit)? = nu
 }
 
 @Composable
-private fun EmptyState(title: String, body: String, modifier: Modifier = Modifier) {
+internal fun EmptyState(title: String, body: String, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxWidth()

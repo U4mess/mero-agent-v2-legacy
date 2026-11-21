@@ -4,12 +4,21 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.u4mess.ume.UmeApplication
+import com.u4mess.ume.brain.LocalLlmEngine
+import com.u4mess.ume.brain.ModelStatus
 import com.u4mess.ume.memory.MemorySource
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class NotificationCaptureService : NotificationListenerService() {
 
     private val repository
         get() = (application as UmeApplication).memoryRepository
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val recentKeys = object : LinkedHashMap<String, Long>(16, 0.75f, true) {}
 
@@ -29,13 +38,25 @@ class NotificationCaptureService : NotificationListenerService() {
         val key = "${statusBarNotification.packageName}|$title|$text"
         if (isDuplicate(key)) return
 
-        repository.insert(
+        val id = repository.insert(
             source = MemorySource.NOTIFICATION,
             packageName = statusBarNotification.packageName,
             title = title,
             content = text,
             timestamp = statusBarNotification.postTime,
         )
+
+        if (LocalLlmEngine.embeddingStatus.value is ModelStatus.Ready) {
+            scope.launch {
+                val embedding = LocalLlmEngine.embed("$title\n$text")
+                if (embedding != null) repository.updateEmbedding(id, embedding)
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
     }
 
     private fun isIgnored(sbn: StatusBarNotification): Boolean {

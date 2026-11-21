@@ -10,6 +10,7 @@ plugins {
 android {
     namespace = "com.u4mess.ume"
     compileSdk = 36
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId = "com.u4mess.ume"
@@ -20,6 +21,19 @@ android {
 
         ndk {
             abiFilters += "arm64-v8a"
+        }
+
+        externalNativeBuild {
+            cmake {
+                arguments += "-DANDROID_STL=c++_shared"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 
@@ -51,4 +65,5 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("io.objectbox:objectbox-android:5.4.2")
     implementation("io.objectbox:objectbox-kotlin:5.4.2")
+    implementation("androidx.work:work-runtime-ktx:2.10.5")
 }
