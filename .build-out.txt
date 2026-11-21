@@ -37,18 +37,7 @@
 > Task :app:writeDebugAppMetadata UP-TO-DATE
 > Task :app:writeDebugSigningConfigVersions UP-TO-DATE
 > Task :app:kaptGenerateStubsDebugKotlin
-
-> Task :app:kaptDebugKotlin
-[ObjectBox] ID model file unchanged: default.json
-[ObjectBox] ObjectBox Generator
-[ObjectBox] Copyright 2017-2025 ObjectBox Ltd, objectbox.io. Licensed under GNU Affero General Public License, Version 3.
-[ObjectBox] This program comes with ABSOLUTELY NO WARRANTY
-[ObjectBox] Processing schema version 1...
-[ObjectBox] Written com.u4mess.ume.memory.MemoryEntityCursor.java
-[ObjectBox] Written com.u4mess.ume.memory.MemoryEntity_.java
-[ObjectBox] Written com.u4mess.ume.memory.MyObjectBox.java
-[ObjectBox] Processed 1 entities in 26ms
-
+> Task :app:kaptDebugKotlin UP-TO-DATE
 > Task :app:compileDebugKotlin
 > Task :app:compileDebugJavaWithJavac UP-TO-DATE
 > Task :app:processDebugJavaRes UP-TO-DATE
@@ -61,5 +50,5 @@
 > Task :app:createDebugApkListingFileRedirect UP-TO-DATE
 > Task :app:assembleDebug
 
-BUILD SUCCESSFUL in 5s
-44 actionable tasks: 9 executed, 35 up-to-date
+BUILD SUCCESSFUL in 2s
+44 actionable tasks: 8 executed, 36 up-to-date

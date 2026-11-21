@@ -34,7 +34,11 @@ object UiAgentLoop {
     private const val SETTLE_MS = 1500L
     private const val MAX_UI_NODES = 160
     private const val MAX_UI_TEXT = 140
-    private const val MAX_APPS = 80
+
+    private val goalStopWords = setOf(
+        "open", "launch", "start", "the", "a", "an", "app", "application",
+        "to", "on", "my", "please", "and", "for", "with", "in", "of", "me", "it",
+    )
 
     private data class InstalledApp(val packageName: String, val label: String)
 
@@ -76,6 +80,7 @@ object UiAgentLoop {
         Rules:
         - Use only nodeId values that exist in the CURRENT UI.
         - Prefer OPEN_APP with an exact package from the installed app list to start a task.
+        - NEVER guess standard package names like com.google.android.youtube. ALWAYS pick the exact packageName from the provided installed_apps list.
         - Click and type only when the target node is visible and suitable.
         - Inspect the updated UI after every action.
         - Reply with DONE as soon as the goal is achieved.
@@ -96,7 +101,7 @@ object UiAgentLoop {
             )
         }
 
-        val apps = launchableApps(context)
+        val apps = rankAppsForGoal(goal, launchableApps(context))
         val history = mutableListOf<String>()
         val details = mutableListOf<AgentStep>()
         var lastDetail = ""
@@ -190,6 +195,9 @@ object UiAgentLoop {
             )
             history += "$step. $label - ${if (outcome.ok) "ok" else "failed"}: ${outcome.detail}"
             lastDetail = outcome.detail
+            if (action.name == "OPEN_APP" && outcome.ok && isOpenOnlyGoal(goal)) {
+                return UiAgentResult(true, outcome.detail, history, details)
+            }
             delay(SETTLE_MS)
         }
 
@@ -211,8 +219,8 @@ object UiAgentLoop {
         appendLine("Goal: $goal")
         appendLine("Step: $step of $MAX_STEPS")
         appendLine()
-        appendLine("Installed launchable apps (package — label):")
-        apps.take(MAX_APPS).forEach { app -> appendLine("${app.packageName} — ${app.label}") }
+        appendLine("installed_apps (package — label), best matches first:")
+        apps.forEach { app -> appendLine("${app.packageName} — ${app.label}") }
         appendLine()
         appendLine("Previous steps:")
         if (history.isEmpty()) appendLine("(none)") else history.forEach { appendLine(it) }
@@ -294,6 +302,7 @@ object UiAgentLoop {
                 StepOutcome(false, "OPEN_APP needs a package or app name.")
             } else {
                 val packageName = resolvePackage(context, requested, apps)
+                    ?: fuzzyFindApp(requested, action.reason, apps)?.packageName
                 if (packageName == null) {
                     StepOutcome(false, "No installed app matches \"$requested\".")
                 } else {
@@ -301,11 +310,16 @@ object UiAgentLoop {
                     if (intent == null) {
                         StepOutcome(false, "No launchable app found for $packageName.")
                     } else {
+                        val label = apps.firstOrNull { it.packageName == packageName }?.label
+                            ?: packageName
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         runCatching { context.startActivity(intent) }.fold(
-                            onSuccess = { StepOutcome(true, "Opened $packageName.") },
+                            onSuccess = { StepOutcome(true, "Opened $label ($packageName).") },
                             onFailure = {
-                                StepOutcome(false, it.message ?: "Could not open $packageName.")
+                                StepOutcome(
+                                    false,
+                                    it.message ?: "Could not open $label ($packageName).",
+                                )
                             },
                         )
                     }
@@ -375,6 +389,68 @@ object UiAgentLoop {
             ?.let { return it.packageName }
 
         return apps.firstOrNull { it.label.contains(requested, ignoreCase = true) }?.packageName
+    }
+
+    private fun fuzzyFindApp(
+        requested: String,
+        reason: String,
+        apps: List<InstalledApp>,
+    ): InstalledApp? {
+        val segment = requested.substringAfterLast('.').lowercase(Locale.ROOT).trim()
+        val reasonWords = goalKeywords(reason)
+
+        val scored = apps.mapNotNull { app ->
+            val label = app.label.lowercase(Locale.ROOT)
+            val packageName = app.packageName.lowercase(Locale.ROOT)
+            var score = 0
+
+            if (segment.length >= 3 && (label.contains(segment) || packageName.contains(segment))) {
+                score += 4
+            }
+            reasonWords.forEach { word ->
+                if (label.contains(word) || packageName.contains(word)) score += 2
+            }
+            if (score > 0) app to score else null
+        }
+
+        return scored.maxByOrNull { it.second }?.first
+    }
+
+    private fun rankAppsForGoal(goal: String, apps: List<InstalledApp>): List<InstalledApp> {
+        val keywords = goalKeywords(goal)
+        if (keywords.isEmpty()) return apps
+
+        return apps.map { app ->
+            val label = app.label.lowercase(Locale.ROOT)
+            val packageName = app.packageName.lowercase(Locale.ROOT)
+            val score = keywords.count { label.contains(it) || packageName.contains(it) }
+            app to score
+        }
+            .sortedWith(
+                compareByDescending<Pair<InstalledApp, Int>> { it.second }
+                    .thenBy { it.first.label.lowercase(Locale.ROOT) },
+            )
+            .map { it.first }
+    }
+
+    private fun goalKeywords(text: String): List<String> =
+        text.lowercase(Locale.ROOT)
+            .split(Regex("[^a-z0-9.]+"))
+            .filter { it.length >= 3 && it !in goalStopWords }
+            .distinct()
+
+    private fun isOpenOnlyGoal(goal: String): Boolean {
+        val text = goal.lowercase(Locale.ROOT).trim()
+        val opensApp = text.startsWith("open ") || text.startsWith("launch ") ||
+            text.startsWith("start ")
+        if (!opensApp) return false
+
+        val followUpActions = listOf(
+            "search", "play", "watch", "send", "buy", "order", "delete", "confirm",
+            "submit", "type", "click", "navigate", "find", "install", "uninstall",
+            "share", "message", "call", "comment", "subscribe",
+        )
+        return followUpActions.none { text.contains(it) }
     }
 
     private fun actionLabel(action: Action, apps: List<InstalledApp>): String {

@@ -9,14 +9,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -34,10 +37,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -47,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.u4mess.ume.brain.AgentStep
 import com.u4mess.ume.brain.ChatController
+import com.u4mess.ume.brain.ChatMode
 import com.u4mess.ume.brain.ChatRole
 import com.u4mess.ume.brain.UiAgentResult
 import com.u4mess.ume.service.ApprovalRequest
@@ -67,16 +73,28 @@ object ChatFocusRequest {
 }
 
 private val WarmAccent = Color(0xFFD9A15B)
-private val UserShape = RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp)
-private val UmeShape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 6.dp)
+private val UserShape = RoundedCornerShape(
+    topStart = 20.dp,
+    topEnd = 20.dp,
+    bottomEnd = 6.dp,
+    bottomStart = 20.dp,
+)
+private val UmeShape = RoundedCornerShape(
+    topStart = 20.dp,
+    topEnd = 20.dp,
+    bottomEnd = 20.dp,
+    bottomStart = 6.dp,
+)
 
 @Composable
 fun ChatScreen() {
     val messages by ChatController.messages.collectAsState()
     val generating by ChatController.generating.collectAsState()
+    val mode by ChatController.mode.collectAsState()
     val agentStatus by IslandAgent.status.collectAsState()
     val approval by IslandAgent.approval.collectAsState()
     val charging = rememberCharging()
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
     val inputFocus = remember { FocusRequester() }
@@ -113,12 +131,14 @@ fun ChatScreen() {
     Column(
         Modifier
             .fillMaxSize()
-            .imePadding(),
+            .then(if (imeVisible) Modifier.imePadding() else Modifier),
     ) {
         ChatHeader(
             mood = mood,
             subtitle = moodText,
             generating = generating,
+            mode = mode,
+            onModeChange = ChatController::setMode,
             onStop = { ChatController.stop() },
         )
 
@@ -135,7 +155,7 @@ fun ChatScreen() {
                     .weight(1f)
                     .fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(messages, key = { it.id }) { message ->
                     MessageBubble(message)
@@ -156,6 +176,7 @@ fun ChatScreen() {
             onValueChange = { input = it },
             generating = generating,
             focusRequester = inputFocus,
+            imeVisible = imeVisible,
             onSend = {
                 if (input.isNotBlank()) {
                     ChatController.send(input)
@@ -171,145 +192,226 @@ private fun ChatHeader(
     mood: MonkeyMood,
     subtitle: String,
     generating: Boolean,
+    mode: ChatMode,
+    onModeChange: (ChatMode) -> Unit,
     onStop: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
+    Column(
+        Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 8.dp),
     ) {
-        UmeMonkeyFace(Modifier.size(40.dp), mood = mood)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = "Ume",
-                color = TextPrimary,
-                fontFamily = UmeSerif,
-                fontSize = 23.sp,
-            )
-            Text(
-                text = subtitle,
-                color = TextSecondary,
-                fontSize = 11.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (generating) {
-            Text(
-                text = "Stop",
-                color = TextPrimary,
-                fontSize = 12.sp,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Elevated)
-                    .border(1.dp, Border, RoundedCornerShape(12.dp))
-                    .clickable(onClick = onStop)
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun MessageBubble(message: ChatController.Message) {
-    if (message.role == ChatRole.USER) {
-        Column(
-            Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.End,
-        ) {
-            Text(
-                text = message.text,
-                color = TextPrimary,
-                fontSize = 14.sp,
-                lineHeight = 20.sp,
-                modifier = Modifier
-                    .widthIn(max = 310.dp)
-                    .clip(UserShape)
-                    .background(Elevated)
-                    .border(1.dp, Border, UserShape)
-                    .padding(horizontal = 15.dp, vertical = 11.dp),
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = formatChatTime(message.createdAt),
-                color = TextSecondary,
-                fontSize = 9.sp,
-            )
-        }
-    } else {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Top,
-        ) {
-            UmeMonkeyFace(
-                Modifier
-                    .padding(top = 4.dp)
-                    .size(24.dp),
-                mood = MonkeyMood.IDLE,
-            )
-            Spacer(Modifier.width(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            UmeMonkeyFace(Modifier.size(40.dp), mood = mood)
+            Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = if (message.proactive) "UME \u00B7 DAILY SUMMARY" else "UME",
-                    color = if (message.proactive) WarmAccent else TextSecondary,
-                    fontSize = 9.sp,
-                    letterSpacing = 1.sp,
-                    fontWeight = FontWeight.Medium,
+                    text = "Ume",
+                    color = TextPrimary,
+                    fontFamily = UmeSerif,
+                    fontSize = 23.sp,
                 )
-                Spacer(Modifier.height(4.dp))
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(UmeShape)
-                        .background(Elevated)
-                        .border(
-                            1.dp,
-                            if (message.proactive) WarmAccent else Border,
-                            UmeShape,
-                        )
-                        .padding(14.dp),
-                ) {
-                    if (message.agent != null) {
-                        AgentStatusCard(message.agent)
-                    } else {
-                        val content = when {
-                            message.text.isBlank() && message.streaming -> "Thinking..."
-                            message.streaming -> message.text + "|"
-                            else -> message.text
-                        }
-                        Text(
-                            text = content,
-                            color = if (message.text.isBlank() && message.streaming) {
-                                TextSecondary
-                            } else {
-                                TextPrimary
-                            },
-                            fontSize = 14.sp,
-                            lineHeight = 21.sp,
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
                 Text(
-                    text = formatChatTime(message.createdAt),
+                    text = subtitle,
                     color = TextSecondary,
-                    fontSize = 9.sp,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
+            }
+            if (generating) {
+                Text(
+                    text = "Stop",
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Elevated)
+                        .border(1.dp, Border, RoundedCornerShape(12.dp))
+                        .clickable(onClick = onStop)
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "MODE",
+                color = TextSecondary,
+                fontSize = 9.sp,
+                letterSpacing = 0.8.sp,
+            )
+            Spacer(Modifier.width(8.dp))
+            ChatMode.entries.forEach { option ->
+                ChatModePill(
+                    label = option.label,
+                    selected = mode == option,
+                    onClick = { onModeChange(option) },
+                )
+                Spacer(Modifier.width(5.dp))
             }
         }
     }
 }
 
 @Composable
-private fun AgentStatusCard(result: UiAgentResult) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
+private fun ChatModePill(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        text = label,
+        color = if (selected) Black else TextSecondary,
+        fontSize = 10.sp,
+        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) TextPrimary else Elevated)
+            .border(1.dp, if (selected) TextPrimary else Border, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    )
+}
+
+@Composable
+private fun MessageBubble(message: ChatController.Message) {
+    val dark = UmeDark
+    var agentExpanded by rememberSaveable { mutableStateOf(false) }
+
+    if (message.role == ChatRole.USER) {
+        val bubbleColor = if (dark) Color(0xFF9E582B) else Color(0xFFB86B3A)
+
+        Column(
+            Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.End,
+        ) {
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 280.dp)
+                    .wrapContentWidth(Alignment.End)
+                    .clip(UserShape)
+                    .background(bubbleColor)
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+            ) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = message.text,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = formatChatTime(message.createdAt),
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 10.sp,
+                    )
+                }
+            }
+        }
+    } else {
+        val bubbleColor = if (dark) Color(0xFF1A1918) else Color(0xFFFFFFFF)
+        val bubbleBorder = if (dark) Color(0xFF2C2A28) else Color(0xFFE6E2DA)
+        val badge = when {
+            message.proactive -> "UME \u00B7 DAILY SUMMARY"
+            message.agent != null -> "UME \u00B7 AGENT"
+            else -> null
+        }
+
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            UmeMonkeyFace(
+                Modifier.size(28.dp),
+                mood = MonkeyMood.IDLE,
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(
+                Modifier.then(
+                    if (message.agent != null) {
+                        Modifier.clickable { agentExpanded = !agentExpanded }
+                    } else {
+                        Modifier
+                    },
+                ),
+            ) {
+                if (badge != null) {
+                    Text(
+                        text = badge,
+                        color = if (message.proactive) WarmAccent else TextSecondary,
+                        fontSize = 9.sp,
+                        letterSpacing = 1.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                }
+                Column(
+                    modifier = Modifier
+                        .widthIn(max = 280.dp)
+                        .wrapContentWidth(Alignment.Start)
+                        .then(if (dark) Modifier else Modifier.shadow(1.dp, UmeShape))
+                        .clip(UmeShape)
+                        .background(bubbleColor)
+                        .border(
+                            1.dp,
+                            if (message.proactive) WarmAccent else bubbleBorder,
+                            UmeShape,
+                        )
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                ) {
+                    if (message.agent != null) {
+                        AgentStatusCard(message.agent, expanded = agentExpanded)
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = formatChatTime(message.createdAt),
+                            color = TextSecondary.copy(alpha = 0.6f),
+                            fontSize = 10.sp,
+                            modifier = Modifier.align(Alignment.End),
+                        )
+                    } else {
+                        val content = when {
+                            message.text.isBlank() && message.streaming -> "Thinking..."
+                            message.streaming -> message.text + "|"
+                            else -> message.text
+                        }
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(
+                                text = content,
+                                color = if (message.text.isBlank() && message.streaming) {
+                                    TextSecondary
+                                } else {
+                                    TextPrimary
+                                },
+                                fontSize = 14.sp,
+                                lineHeight = 21.sp,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = formatChatTime(message.createdAt),
+                                color = TextSecondary.copy(alpha = 0.6f),
+                                fontSize = 10.sp,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentStatusCard(result: UiAgentResult, expanded: Boolean) {
     var technical by rememberSaveable { mutableStateOf(false) }
 
     val stopped = result.message.contains("stopped", ignoreCase = true) ||
         result.details.any { it.label == "Cancelled" }
     val count = result.details.size.coerceAtLeast(result.steps.size)
+    val lastDetail = result.details.lastOrNull()?.detail.orEmpty()
+    val summary = when {
+        lastDetail.isNotBlank() -> lastDetail
+        stopped -> "Stopped"
+        else -> result.message
+    }
     val badge = when {
         stopped -> "Stopped"
         result.success -> "Completed in $count steps"
@@ -323,18 +425,17 @@ private fun AgentStatusCard(result: UiAgentResult) {
 
     Column(Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded },
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top,
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = if (stopped) "Stopped" else result.message,
+                    text = summary,
                     color = TextPrimary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
-                    maxLines = 1,
+                    lineHeight = 17.sp,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(3.dp))
@@ -346,10 +447,10 @@ private fun AgentStatusCard(result: UiAgentResult) {
                 )
             }
             Text(
-                text = if (expanded) "Hide" else "Steps",
+                text = if (expanded) "\u25B4" else "\u25BE",
                 color = TextSecondary,
-                fontSize = 10.sp,
-                modifier = Modifier.padding(start = 8.dp, top = 2.dp),
+                fontSize = 13.sp,
+                modifier = Modifier.padding(start = 8.dp),
             )
         }
 
@@ -436,17 +537,22 @@ private fun ApprovalBanner(
     onApprove: () -> Unit,
     onCancel: () -> Unit,
 ) {
+    val dark = UmeDark
+    val bubbleColor = if (dark) Color(0xFF1A1918) else Color(0xFFFFFFFF)
+    val bubbleBorder = if (dark) Color(0xFF2C2A28) else Color(0xFFE6E2DA)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Elevated)
-            .border(1.dp, WarmAccent, RoundedCornerShape(18.dp))
+            .then(if (dark) Modifier else Modifier.shadow(1.dp, UmeShape))
+            .clip(UmeShape)
+            .background(bubbleColor)
+            .border(1.dp, bubbleBorder, UmeShape)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        UmeMonkeyFace(Modifier.size(26.dp), mood = MonkeyMood.ACTING)
+        UmeMonkeyFace(Modifier.size(28.dp), mood = MonkeyMood.ACTING)
         Spacer(Modifier.width(9.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -494,12 +600,18 @@ private fun ChatInput(
     onValueChange: (String) -> Unit,
     generating: Boolean,
     focusRequester: FocusRequester,
+    imeVisible: Boolean,
     onSend: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
+            .padding(
+                start = 20.dp,
+                end = 20.dp,
+                top = 8.dp,
+                bottom = if (imeVisible) 8.dp else 12.dp,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(

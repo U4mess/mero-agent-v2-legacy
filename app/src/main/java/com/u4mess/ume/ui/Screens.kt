@@ -2,12 +2,15 @@ package com.u4mess.ume.ui
 
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
 import android.os.BatteryManager
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import android.widget.Toast
@@ -41,10 +44,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -128,6 +134,7 @@ fun MemoryScreen() {
     var keyword by rememberSaveable { mutableStateOf("") }
     var sourceFilter by rememberSaveable { mutableStateOf("") }
     var memories by remember { mutableStateOf<List<MemoryEntity>>(emptyList()) }
+    var selectedMemory by remember { mutableStateOf<MemoryEntity?>(null) }
     val charging = rememberCharging()
     var latestSummary by remember { mutableStateOf<String?>(null) }
 
@@ -262,6 +269,7 @@ fun MemoryScreen() {
                     items(group, key = { it.id }) { memory ->
                         BentoMemoryCard(
                             memory = memory,
+                            onOpen = { selectedMemory = memory },
                             onDelete = {
                                 scope.launch(Dispatchers.IO) { repository.delete(memory.id) }
                             },
@@ -270,6 +278,10 @@ fun MemoryScreen() {
                 }
             }
         }
+    }
+
+    selectedMemory?.let { memory ->
+        MemoryDetailSheet(memory) { selectedMemory = null }
     }
 }
 
@@ -300,6 +312,10 @@ fun SettingsScreen() {
                 ComponentName(serviceInfo.packageName, serviceInfo.name) == expected
             }
     }
+    val batteryUnrestricted = remember(refresh) {
+        context.getSystemService(PowerManager::class.java)
+            ?.isIgnoringBatteryOptimizations(context.packageName) == true
+    }
     val islandRunning by IslandState.running.collectAsState()
     val themeMode by ThemeSettings.mode.collectAsState()
     val cloudEnabled by CloudSettings.enabled.collectAsState()
@@ -310,6 +326,7 @@ fun SettingsScreen() {
     var keySaved by remember(cloudProvider) { mutableStateOf(CloudSettings.hasKey()) }
     var yOffset by remember { mutableFloatStateOf(IslandSettings.yOffsetDp.value.toFloat()) }
     var islandWidth by remember { mutableFloatStateOf(IslandSettings.widthDp.value.toFloat()) }
+    var xOffset by remember { mutableFloatStateOf(IslandSettings.xOffsetDp.value.toFloat()) }
 
     Column(
         Modifier
@@ -384,6 +401,18 @@ fun SettingsScreen() {
             RowDivider()
             PermissionRow("Accessibility", accessibilityGranted) {
                 context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+            RowDivider()
+            PermissionRow("Battery unrestricted", batteryUnrestricted) {
+                val request = Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:${context.packageName}"),
+                )
+                runCatching { context.startActivity(request) }.onFailure {
+                    runCatching {
+                        context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                    }
+                }
             }
 
             HorizontalDivider(color = Border, thickness = 1.dp)
@@ -496,6 +525,44 @@ fun SettingsScreen() {
                         IslandSettings.persistWidth(islandWidth.roundToInt())
                     },
                     valueRange = IslandSettings.MIN_WIDTH_DP.toFloat()..IslandSettings.MAX_WIDTH_DP.toFloat(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = TextPrimary,
+                        activeTrackColor = TextPrimary,
+                        inactiveTrackColor = Border,
+                        activeTickColor = TextPrimary,
+                        inactiveTickColor = Border,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 6.dp),
+                ) {
+                    Text(
+                        text = "Dynamic Island X-Offset",
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "${if (xOffset > 0) "+" else ""}${xOffset.roundToInt()} dp",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                Slider(
+                    value = xOffset,
+                    onValueChange = {
+                        xOffset = it
+                        IslandSettings.previewXOffset(it.roundToInt())
+                    },
+                    onValueChangeFinished = {
+                        IslandSettings.persistXOffset(xOffset.roundToInt())
+                    },
+                    valueRange = IslandSettings.MIN_X_OFFSET_DP.toFloat()..IslandSettings.MAX_X_OFFSET_DP.toFloat(),
                     colors = SliderDefaults.colors(
                         thumbColor = TextPrimary,
                         activeTrackColor = TextPrimary,
@@ -968,7 +1035,11 @@ private fun DateHeader(label: String) {
 }
 
 @Composable
-private fun BentoMemoryCard(memory: MemoryEntity, onDelete: () -> Unit) {
+private fun BentoMemoryCard(
+    memory: MemoryEntity,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+) {
     val shape = RoundedCornerShape(22.dp)
     val title = memory.title.ifBlank { memoryFallbackTitle(memory.source) }
     val packageLabel = memory.packageName.ifBlank {
@@ -987,6 +1058,7 @@ private fun BentoMemoryCard(memory: MemoryEntity, onDelete: () -> Unit) {
             .clip(shape)
             .background(Elevated)
             .border(1.dp, Border, shape)
+            .clickable(onClick = onOpen)
             .padding(13.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1046,6 +1118,106 @@ private fun BentoMemoryCard(memory: MemoryEntity, onDelete: () -> Unit) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MemoryDetailSheet(memory: MemoryEntity, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val title = memory.title.ifBlank { memoryFallbackTitle(memory.source) }
+    val packageLabel = memory.packageName.ifBlank {
+        if (memory.source == MemorySource.ACTION || memory.source == MemorySource.SUMMARY) {
+            "Ume Agent"
+        } else {
+            "unknown"
+        }
+    }
+    val fullText = buildString {
+        appendLine(title)
+        appendLine("Source: ${memorySourceLabel(memory.source)}")
+        appendLine("Package: $packageLabel")
+        appendLine("Time: ${formatTimestamp(memory.timestamp)}")
+        appendLine()
+        append(memory.content.ifBlank { "No content" })
+    }
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Elevated,
+        contentColor = TextPrimary,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+        ) {
+            Text(
+                text = "Memory",
+                color = TextSecondary,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = title,
+                color = TextPrimary,
+                fontFamily = UmeSerif,
+                fontSize = 22.sp,
+                lineHeight = 27.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "${memorySourceLabel(memory.source)} \u00B7 $packageLabel",
+                color = TextSecondary,
+                fontSize = 11.sp,
+            )
+            Text(
+                text = formatTimestamp(memory.timestamp),
+                color = TextSecondary,
+                fontSize = 11.sp,
+            )
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider(color = Border, thickness = 1.dp)
+            Spacer(Modifier.height(12.dp))
+            Column(
+                Modifier
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    text = memory.content.ifBlank { "No content" },
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Copy",
+                    color = Black,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(TextPrimary)
+                        .clickable {
+                            context.getSystemService(ClipboardManager::class.java)
+                                ?.setPrimaryClip(ClipData.newPlainText("Ume memory", fullText))
+                            Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                        }
+                        .padding(horizontal = 16.dp, vertical = 9.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+                TextButton(onClick = onDismiss) {
+                    Text("Close", color = TextSecondary, fontSize = 12.sp)
+                }
+            }
+        }
     }
 }
 

@@ -22,6 +22,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+enum class ChatMode(val label: String) {
+    AUTO("Auto"),
+    LOCAL("Local"),
+    CLOUD("Cloud"),
+}
+
 object ChatController {
 
     data class Message(
@@ -39,6 +45,8 @@ object ChatController {
 
     private val _generating = MutableStateFlow(false)
     val generating: StateFlow<Boolean> = _generating.asStateFlow()
+
+    val mode = MutableStateFlow(ChatMode.AUTO)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val pending = Channel<String>(Channel.UNLIMITED)
@@ -79,6 +87,10 @@ object ChatController {
         if (text.isNotEmpty()) pending.trySend(text)
     }
 
+    fun setMode(value: ChatMode) {
+        mode.value = value
+    }
+
     fun postProactiveSummary(text: String) {
         val summary = text.trim()
         if (summary.isEmpty()) return
@@ -108,9 +120,35 @@ object ChatController {
         _messages.update { it + Message(assistantId, ChatRole.ASSISTANT, "", streaming = true) }
 
         try {
-            when (HybridRouter.route(prompt)) {
-                HybridRoute.LOCAL -> generateLocal(HybridRouter.clean(prompt), assistantId)
-                HybridRoute.CLOUD -> runCloudAction(HybridRouter.clean(prompt), assistantId)
+            val cleaned = HybridRouter.clean(prompt)
+            when {
+                HybridRouter.route(prompt) == HybridRoute.CLOUD -> {
+                    runCloudAction(cleaned, assistantId)
+                }
+
+                mode.value == ChatMode.CLOUD -> {
+                    generateCloudChat(cleaned, assistantId)
+                }
+
+                mode.value == ChatMode.LOCAL -> {
+                    generateLocal(cleaned, assistantId)
+                }
+
+                LocalLlmEngine.chatStatus.value is ModelStatus.Ready -> {
+                    generateLocal(cleaned, assistantId)
+                }
+
+                CloudSettings.hasKey() -> {
+                    generateCloudChat(cleaned, assistantId)
+                }
+
+                else -> {
+                    replace(
+                        assistantId,
+                        "Auto couldn't find a loaded local model or a cloud API key. " +
+                            "Load a .gguf in Models or add a key in Settings -> Cloud Action Brain.",
+                    )
+                }
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -147,6 +185,40 @@ object ChatController {
         if (textOf(assistantId).isBlank()) {
             replace(assistantId, "The model returned no text.")
         }
+    }
+
+    private suspend fun generateCloudChat(prompt: String, assistantId: Long) {
+        if (prompt.isBlank()) {
+            replace(assistantId, "Tell me what to do, or just say hello.")
+            return
+        }
+        if (!CloudSettings.hasKey()) {
+            replace(
+                assistantId,
+                "Cloud chat needs a ${CloudSettings.providerLabel()} API key. " +
+                    "Add one in Settings -> Cloud Action Brain.",
+            )
+            notifyIsland("Add ${CloudSettings.providerLabel()} key")
+            return
+        }
+
+        val system = buildSystemPrompt(prompt, local = false)
+        val turns = _messages.value
+            .filter { it.id != assistantId && it.text.isNotBlank() }
+            .takeLast(8)
+            .map { ChatTurn(it.role, it.text) }
+
+        CloudLlmClient.chatCompletion(turns, system).fold(
+            onSuccess = { answer ->
+                replace(assistantId, answer.trim().ifBlank { "The cloud model returned no text." })
+            },
+            onFailure = { throwable ->
+                replace(
+                    assistantId,
+                    "Cloud chat failed: ${throwable.message ?: "unknown error"}",
+                )
+            },
+        )
     }
 
     private suspend fun runCloudAction(goal: String, assistantId: Long) {
@@ -230,14 +302,18 @@ object ChatController {
         }
     }
 
-    private suspend fun buildSystemPrompt(query: String): String {
+    private suspend fun buildSystemPrompt(query: String, local: Boolean = true): String {
         val memories = retrieveMemories(query)
         val modelName = ModelManager.chatSelection.value?.displayName
         return buildString {
-            if (modelName != null) {
-                append("You are Ume, a private on-device AI assistant running locally via $modelName.")
+            if (local) {
+                if (modelName != null) {
+                    append("You are Ume, a private on-device AI assistant running locally via $modelName.")
+                } else {
+                    append("You are Ume, a private on-device AI assistant running locally.")
+                }
             } else {
-                append("You are Ume, a private on-device AI assistant running locally.")
+                append("You are Ume, a helpful AI assistant with access to the user's memories.")
             }
             append(" Answer directly and concisely.")
             if (memories.isNotEmpty()) {

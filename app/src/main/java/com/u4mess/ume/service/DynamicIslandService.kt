@@ -106,6 +106,7 @@ class DynamicIslandService : Service() {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            x = restingX(IslandAgent.status.value)
             y = collapsedY()
             title = "Ume Island"
             layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -131,8 +132,11 @@ class DynamicIslandService : Service() {
         }
         scope.launch {
             IslandAgent.status.collect { status ->
+                layoutParams.x = restingX(status)
                 if (!expanded.value) {
                     animateYTo(restingY(status))
+                } else {
+                    updateLayout()
                 }
                 updateTouchRelay(status)
             }
@@ -144,8 +148,17 @@ class DynamicIslandService : Service() {
             }
         }
         scope.launch {
+            IslandSettings.xOffsetDp.collect {
+                if (!::islandView.isInitialized) return@collect
+                layoutParams.x = restingX(IslandAgent.status.value)
+                updateLayout()
+                updateTouchRelay()
+            }
+        }
+        scope.launch {
             ScreenReaderAccessibilityService.connected.collect {
                 if (!expanded.value) {
+                    layoutParams.x = restingX(IslandAgent.status.value)
                     layoutParams.y = restingY(IslandAgent.status.value)
                     updateLayout()
                     updateTouchRelay()
@@ -183,7 +196,9 @@ class DynamicIslandService : Service() {
         } else {
             WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
         }
+        layoutParams.x = restingX(IslandAgent.status.value)
         animateYTo(if (value) expandedY() else restingY(IslandAgent.status.value))
+        updateLayout()
         updateTouchRelay()
 
         if (value) {
@@ -203,6 +218,11 @@ class DynamicIslandService : Service() {
         IslandTouchRelay.update(
             visible = !expanded.value && status == null,
             offsetDp = IslandSettings.yOffsetDp.value,
+            xOffsetDp = if (status == null && !expanded.value) {
+                IslandSettings.xOffsetDp.value
+            } else {
+                0
+            },
             widthDp = IslandSettings.widthDp.value,
             heightDp = 24,
             onClick = {
@@ -220,6 +240,13 @@ class DynamicIslandService : Service() {
 
     private fun restingY(status: AgentStatus?): Int =
         if (status != null) expandedY() else collapsedY()
+
+    private fun restingX(status: AgentStatus?): Int =
+        if (status == null && !expanded.value) {
+            dpToPx(IslandSettings.xOffsetDp.value)
+        } else {
+            0
+        }
 
     private fun expandedY(): Int = statusBarHeightPx() + dpToPx(8)
 

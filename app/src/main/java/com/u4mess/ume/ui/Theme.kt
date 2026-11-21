@@ -58,6 +58,7 @@ private val LightPalette = UmePalette(
 val UmeSerif = FontFamily.Serif
 
 private val LocalUmePalette = staticCompositionLocalOf { OledPalette }
+private val LocalUmeDark = staticCompositionLocalOf { true }
 
 // Token names kept from the original OLED theme; each resolves from the active palette.
 val Black: Color
@@ -74,6 +75,9 @@ val TextPrimary: Color
 
 val TextSecondary: Color
     @Composable @ReadOnlyComposable get() = LocalUmePalette.current.textSecondary
+
+val UmeDark: Boolean
+    @Composable @ReadOnlyComposable get() = LocalUmeDark.current
 
 private val UmeTypography = Typography(
     titleLarge = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp),
@@ -139,7 +143,10 @@ fun UmeTheme(content: @Composable () -> Unit) {
         }
     }
 
-    CompositionLocalProvider(LocalUmePalette provides palette) {
+    CompositionLocalProvider(
+        LocalUmePalette provides palette,
+        LocalUmeDark provides dark,
+    ) {
         MaterialTheme(colorScheme = scheme, typography = UmeTypography, content = content)
     }
 }

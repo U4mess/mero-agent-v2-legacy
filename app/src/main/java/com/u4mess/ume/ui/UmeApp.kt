@@ -11,7 +11,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -37,6 +41,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -60,25 +66,34 @@ private val DockTabSelected = Color(0xFF242326)
 fun UmeApp() {
     var tab by rememberSaveable { mutableStateOf(Tab.Chat) }
     val generating by ChatController.generating.collectAsState()
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val layoutDirection = LocalLayoutDirection.current
 
     Scaffold(
         containerColor = Black,
         bottomBar = {
-            FloatingDock(
-                selectedTab = tab,
-                generating = generating,
-                onAsk = {
-                    tab = Tab.Chat
-                    ChatFocusRequest.request()
-                },
-                onSelect = { tab = it },
-            )
+            if (!imeVisible) {
+                FloatingDock(
+                    selectedTab = tab,
+                    generating = generating,
+                    onAsk = {
+                        tab = Tab.Chat
+                        ChatFocusRequest.request()
+                    },
+                    onSelect = { tab = it },
+                )
+            }
         },
     ) { innerPadding ->
         Box(
             Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(
+                    top = innerPadding.calculateTopPadding(),
+                    start = innerPadding.calculateStartPadding(layoutDirection),
+                    end = innerPadding.calculateEndPadding(layoutDirection),
+                    bottom = if (imeVisible) 0.dp else innerPadding.calculateBottomPadding(),
+                ),
         ) {
             when (tab) {
                 Tab.Chat -> ChatScreen()

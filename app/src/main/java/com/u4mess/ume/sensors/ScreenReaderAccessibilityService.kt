@@ -35,6 +35,7 @@ class ScreenReaderAccessibilityService : AccessibilityService() {
     fun setIslandTouchRelay(
         visible: Boolean,
         offsetDp: Int,
+        xOffsetDp: Int,
         widthDp: Int,
         heightDp: Int,
         onClick: (() -> Unit)?,
@@ -64,6 +65,7 @@ class ScreenReaderAccessibilityService : AccessibilityService() {
                 PixelFormat.TRANSLUCENT,
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                x = (xOffsetDp * density).toInt()
                 y = (offsetDp * density).toInt()
                 title = "Ume Island Touch"
                 layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -89,6 +91,7 @@ class ScreenReaderAccessibilityService : AccessibilityService() {
             view.setOnClickListener { onClick?.invoke() }
             params.width = (widthDp * density).toInt()
             params.height = (heightDp * density).toInt()
+            params.x = (xOffsetDp * density).toInt()
             params.y = (offsetDp * density).toInt()
             runCatching { windowManager.updateViewLayout(view, params) }
         }

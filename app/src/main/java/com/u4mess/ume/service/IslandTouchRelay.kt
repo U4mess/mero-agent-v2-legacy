@@ -11,6 +11,7 @@ object IslandTouchRelay {
     private var service: ScreenReaderAccessibilityService? = null
     private var visible = false
     private var offsetDp = 7
+    private var xOffsetDp = 14
     private var widthDp = 110
     private var heightDp = 28
     private var onClick: (() -> Unit)? = null
@@ -27,12 +28,14 @@ object IslandTouchRelay {
     fun update(
         visible: Boolean,
         offsetDp: Int,
+        xOffsetDp: Int,
         widthDp: Int,
         heightDp: Int,
         onClick: (() -> Unit)?,
     ) {
         this.visible = visible
         this.offsetDp = offsetDp
+        this.xOffsetDp = xOffsetDp
         this.widthDp = widthDp
         this.heightDp = heightDp
         this.onClick = onClick
@@ -45,6 +48,6 @@ object IslandTouchRelay {
     }
 
     private fun apply() {
-        service?.setIslandTouchRelay(visible, offsetDp, widthDp, heightDp, onClick)
+        service?.setIslandTouchRelay(visible, offsetDp, xOffsetDp, widthDp, heightDp, onClick)
     }
 }

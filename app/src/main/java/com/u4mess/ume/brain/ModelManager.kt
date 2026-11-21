@@ -19,6 +19,7 @@ object ModelManager {
     private const val PREFS_NAME = "ume_models"
     private const val CHAT = "chat"
     private const val EMBEDDING = "embedding"
+    private const val AUTO_LOAD = "auto_load_models"
 
     private lateinit var appContext: Context
     private lateinit var prefs: SharedPreferences
@@ -31,6 +32,12 @@ object ModelManager {
         prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         chatSelection.value = read(CHAT)
         embeddingSelection.value = read(EMBEDDING)
+    }
+
+    fun autoLoadEnabled(): Boolean = prefs.getBoolean(AUTO_LOAD, true)
+
+    fun setAutoLoad(value: Boolean) {
+        prefs.edit().putBoolean(AUTO_LOAD, value).apply()
     }
 
     fun select(context: Context, role: ModelRole, uri: Uri): Boolean {
@@ -58,13 +65,17 @@ object ModelManager {
     suspend fun loadChat(): Boolean = withContext(Dispatchers.IO) {
         val selection = chatSelection.value ?: return@withContext false
         val opened = open(selection) ?: return@withContext false
-        opened.use { LocalLlmEngine.loadChat(it.path) }
+        val loaded = opened.use { LocalLlmEngine.loadChat(it.path) }
+        if (loaded) setAutoLoad(true)
+        loaded
     }
 
     suspend fun loadEmbedding(): Boolean = withContext(Dispatchers.IO) {
         val selection = embeddingSelection.value ?: return@withContext false
         val opened = open(selection) ?: return@withContext false
-        opened.use { LocalLlmEngine.loadEmbedding(it.path) }
+        val loaded = opened.use { LocalLlmEngine.loadEmbedding(it.path) }
+        if (loaded) setAutoLoad(true)
+        loaded
     }
 
     suspend fun ensureChatLoaded(): Boolean =

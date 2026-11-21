@@ -151,7 +151,10 @@ internal fun DynamicIsland(
                         .semantics { contentDescription = "Ume" }
                 },
             )
-            .padding(horizontal = 12.dp),
+            .padding(
+                start = 12.dp,
+                end = if (agentStatus == null && !expanded) 4.dp else 12.dp,
+            ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = if (agentStatus == null && !expanded) {
             Arrangement.End

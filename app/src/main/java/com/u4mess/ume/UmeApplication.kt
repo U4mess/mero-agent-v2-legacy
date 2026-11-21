@@ -16,6 +16,10 @@ import com.u4mess.ume.settings.CloudSettings
 import com.u4mess.ume.settings.ThemeSettings
 import io.objectbox.BoxStore
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class UmeApplication : Application() {
 
@@ -23,6 +27,7 @@ class UmeApplication : Application() {
         private set
 
     private lateinit var boxStore: BoxStore
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()
@@ -35,6 +40,19 @@ class UmeApplication : Application() {
         IslandSettings.init(this)
         ChatController.start(this, memoryRepository)
         scheduleNightlyConsolidation()
+        autoLoadModels()
+    }
+
+    private fun autoLoadModels() {
+        if (!ModelManager.autoLoadEnabled()) return
+        applicationScope.launch {
+            if (ModelManager.chatSelection.value != null) {
+                runCatching { ModelManager.loadChat() }
+            }
+            if (ModelManager.embeddingSelection.value != null) {
+                runCatching { ModelManager.loadEmbedding() }
+            }
+        }
     }
 
     private fun scheduleNightlyConsolidation() {

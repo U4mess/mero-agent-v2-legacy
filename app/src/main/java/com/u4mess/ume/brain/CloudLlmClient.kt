@@ -8,13 +8,36 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** OpenAI-compatible chat completions client used for cloud UI actions. */
+/** OpenAI-compatible client for cloud UI actions and cloud chat. */
 object CloudLlmClient {
 
     suspend fun completeJson(
         systemPrompt: String,
         userPrompt: String,
         maxTokens: Int = 512,
+    ): Result<String> = request(
+        systemPrompt = systemPrompt,
+        turns = listOf(ChatTurn(ChatRole.USER, userPrompt)),
+        jsonMode = true,
+        maxTokens = maxTokens,
+    )
+
+    suspend fun chatCompletion(
+        messages: List<ChatTurn>,
+        systemPrompt: String,
+        maxTokens: Int = 800,
+    ): Result<String> = request(
+        systemPrompt = systemPrompt,
+        turns = messages,
+        jsonMode = false,
+        maxTokens = maxTokens,
+    )
+
+    private suspend fun request(
+        systemPrompt: String,
+        turns: List<ChatTurn>,
+        jsonMode: Boolean,
+        maxTokens: Int,
     ): Result<String> = withContext(Dispatchers.IO) {
         val provider = CloudSettings.provider.value
         val apiKey = CloudSettings.apiKey()?.trim()
@@ -38,18 +61,25 @@ object CloudLlmClient {
             )
         }
 
+        val messages = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", systemPrompt))
+        turns.forEach { turn ->
+            messages.put(
+                JSONObject()
+                    .put("role", if (turn.role == ChatRole.USER) "user" else "assistant")
+                    .put("content", turn.text),
+            )
+        }
+
         val body = JSONObject().apply {
             put("model", modelId)
-            put("temperature", 0.1)
+            put("temperature", if (jsonMode) 0.1 else 0.7)
             put("max_tokens", maxTokens)
             put("stream", false)
-            put("response_format", JSONObject().put("type", "json_object"))
-            put(
-                "messages",
-                JSONArray()
-                    .put(JSONObject().put("role", "system").put("content", systemPrompt))
-                    .put(JSONObject().put("role", "user").put("content", userPrompt)),
-            )
+            if (jsonMode) {
+                put("response_format", JSONObject().put("type", "json_object"))
+            }
+            put("messages", messages)
         }
 
         var connection: HttpURLConnection? = null
