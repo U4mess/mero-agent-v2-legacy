@@ -9,7 +9,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -105,6 +110,8 @@ import com.u4mess.ume.brain.ChatSession
 import com.u4mess.ume.brain.ModelManager
 import com.u4mess.ume.brain.UiAgentResult
 import com.u4mess.ume.brain.VisionImage
+import com.u4mess.ume.brain.VoiceNotePlayer
+import com.u4mess.ume.brain.VoiceNoteRecorder
 import com.u4mess.ume.net.WebResult
 import com.u4mess.ume.service.ApprovalRequest
 import com.u4mess.ume.service.IslandAgent
@@ -167,6 +174,9 @@ fun ChatScreen() {
     var showAttachSheet by remember { mutableStateOf(false) }
     var preparingImage by remember { mutableStateOf(false) }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+    val voiceRecording by VoiceNoteRecorder.recording.collectAsState()
+    val voiceElapsed by VoiceNoteRecorder.elapsedMs.collectAsState()
+    val voiceResult by VoiceNoteRecorder.result.collectAsState()
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     var previousMessageCount by remember { mutableIntStateOf(0) }
@@ -248,6 +258,30 @@ fun ChatScreen() {
         }
     }
 
+    val startVoiceRecording: () -> Unit = {
+        if (!VoiceNoteRecorder.start(context)) {
+            Toast.makeText(context, "Could not start voice recording", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val voiceNotePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            startVoiceRecording()
+        } else {
+            Toast.makeText(context, "Microphone permission is required for voice notes.", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val startVoiceNote: () -> Unit = {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            startVoiceRecording()
+        } else {
+            voiceNotePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
     val micLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -309,6 +343,13 @@ fun ChatScreen() {
                 stagedAttachment = attachment
                 ChatAttachmentStore.consumeSharedAttachment()
             }
+        }
+    }
+
+    LaunchedEffect(voiceResult) {
+        voiceResult?.let { attachment ->
+            stagedAttachment = attachment
+            VoiceNoteRecorder.consumeResult()
         }
     }
 
@@ -392,6 +433,14 @@ fun ChatScreen() {
             )
         }
 
+        if (voiceRecording) {
+            VoiceRecordingBar(
+                elapsedMs = voiceElapsed,
+                onCancel = { VoiceNoteRecorder.cancel() },
+                onStop = { VoiceNoteRecorder.stop() },
+            )
+        }
+
         if (preparingImage) {
             Text(
                 text = "Preparing image...",
@@ -418,13 +467,14 @@ fun ChatScreen() {
             onAttachClick = { showAttachSheet = true },
             onSend = {
                 when {
-                    stagedAttachment?.imagePath != null &&
+                    stagedAttachment?.let { it.imagePath != null || it.audioPath != null } == true &&
                         ModelManager.chatBackend.value != ChatBackend.LITERT_LM -> {
-                        Toast.makeText(
-                            context,
-                            "Load Gemma 4 E2B (.litertlm) in Models to use vision.",
-                            Toast.LENGTH_LONG,
-                        ).show()
+                        val hint = if (stagedAttachment?.audioPath != null) {
+                            "Load Gemma 4 E2B (.litertlm) in Models to use direct voice notes."
+                        } else {
+                            "Load Gemma 4 E2B (.litertlm) in Models to use vision."
+                        }
+                        Toast.makeText(context, hint, Toast.LENGTH_LONG).show()
                     }
                     input.isNotBlank() || stagedAttachment != null -> {
                         ChatController.send(input, stagedAttachment)
@@ -489,6 +539,15 @@ fun ChatScreen() {
                         galleryLauncher.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                         )
+                    },
+                )
+                Spacer(Modifier.height(8.dp))
+                VisionSheetOption(
+                    title = "Voice Note",
+                    subtitle = "Record a direct audio message for Gemma",
+                    onClick = {
+                        showAttachSheet = false
+                        startVoiceNote()
                     },
                 )
                 Spacer(Modifier.height(8.dp))
@@ -913,14 +972,18 @@ private fun MessageBubble(
                     Spacer(Modifier.height(4.dp))
                 }
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text = message.text,
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Spacer(Modifier.width(8.dp))
+                    if (!message.hideText) {
+                        Text(
+                            text = message.text,
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    } else {
+                        Spacer(Modifier.weight(1f))
+                    }
                     Text(
                         text = formatChatTime(message.createdAt),
                         color = Color.White.copy(alpha = 0.6f),
@@ -1309,6 +1372,67 @@ private fun ApprovalButton(label: String, filled: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
+private fun VoiceRecordingBar(
+    elapsedMs: Long,
+    onCancel: () -> Unit,
+    onStop: () -> Unit,
+) {
+    val pulse = rememberInfiniteTransition(label = "voice-pulse").animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
+        label = "voice-pulse-alpha",
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 20.dp, top = 8.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Elevated)
+            .border(0.75.dp, Border, RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(8.dp)
+                .alpha(pulse.value)
+                .clip(CircleShape)
+                .background(WarmAccent),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "Recording  ${formatDuration(elapsedMs)} / 00:30",
+            color = TextPrimary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = "Cancel",
+            color = TextSecondary,
+            fontSize = 11.sp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(onClick = onCancel)
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = "Stop & Attach",
+            color = OnAccent,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(Accent)
+                .clickable(onClick = onStop)
+                .padding(horizontal = 9.dp, vertical = 6.dp),
+        )
+    }
+}
+
+@Composable
 private fun VisionSheetOption(
     title: String,
     subtitle: String,
@@ -1366,14 +1490,18 @@ private fun AttachmentChip(
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                text = attachment.name,
+                text = if (attachment.audioPath != null) "Voice note" else attachment.name,
                 color = TextPrimary,
                 fontSize = 11.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = attachment.kind.label.lowercase() + " attachment",
+                text = if (attachment.audioPath != null) {
+                    "Audio \u00B7 ${formatDuration(attachment.audioDurationMs)}"
+                } else {
+                    attachment.kind.label.lowercase() + " attachment"
+                },
                 color = TextSecondary,
                 fontSize = 9.sp,
             )
@@ -1410,6 +1538,7 @@ private fun AttachmentTypeBadge(
                 ChatAttachmentKind.PDF -> "PDF"
                 ChatAttachmentKind.IMAGE -> "IMG"
                 ChatAttachmentKind.TEXT -> "TXT"
+                ChatAttachmentKind.AUDIO -> "WAV"
             },
             color = foreground,
             fontSize = 8.sp,
@@ -1421,6 +1550,27 @@ private fun AttachmentTypeBadge(
 
 @Composable
 private fun AttachmentInlinePill(attachment: ChatAttachment) {
+    val context = LocalContext.current
+    if (attachment.audioPath != null) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(9.dp))
+                .background(Color.White.copy(alpha = 0.14f))
+                .clickable { VoiceNotePlayer.play(attachment.audioPath) }
+                .padding(horizontal = 9.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("\u25B6", color = Color.White, fontSize = 10.sp)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = "Voice note \u00B7 ${formatDuration(attachment.audioDurationMs)}",
+                color = Color.White.copy(alpha = 0.95f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+        return
+    }
     val bitmap = remember(attachment.imagePath) {
         attachment.imagePath?.let { BitmapFactory.decodeFile(it) }
     }
@@ -1447,6 +1597,7 @@ private fun AttachmentInlinePill(attachment: ChatAttachment) {
                     ChatAttachmentKind.PDF -> "PDF"
                     ChatAttachmentKind.IMAGE -> "IMG"
                     ChatAttachmentKind.TEXT -> "TXT"
+                    ChatAttachmentKind.AUDIO -> "WAV"
                 },
                 color = Color.White,
                 fontSize = 8.sp,
@@ -1559,6 +1710,11 @@ private fun ChatInput(
             )
         }
     }
+}
+
+private fun formatDuration(durationMs: Long): String {
+    val totalSeconds = (durationMs / 1000L).coerceAtLeast(0L)
+    return "%02d:%02d".format(totalSeconds / 60, totalSeconds % 60)
 }
 
 private val CHAT_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm")

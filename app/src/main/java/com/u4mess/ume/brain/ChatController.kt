@@ -53,11 +53,13 @@ object ChatController {
         val webSources: List<WebResult> = emptyList(),
         val attachment: ChatAttachment? = null,
         val sessionId: String = "",
+        val hideText: Boolean = false,
     )
 
     private data class IncomingPrompt(
         val text: String,
         val attachment: ChatAttachment? = null,
+        val hideText: Boolean = false,
     )
 
     private val _messages = MutableStateFlow<List<Message>>(emptyList())
@@ -80,6 +82,25 @@ object ChatController {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val pending = Channel<IncomingPrompt>(Channel.UNLIMITED)
     private val MEMORY_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+    private const val AUDIO_PROMPT =
+        "Do NOT transcribe or repeat what the speaker said. Directly answer the speaker's " +
+            "question or fulfill their request in the same language they spoke."
+
+    private val MEMORY_QUERY = Regex(
+        "\\b(screenshot|screen\\s*shot|screen|notification|notes?|ocr|memory|memories|" +
+            "saved|device memory)\\b",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private fun includeMemoryContext(
+        prompt: String,
+        imagePath: String?,
+        audioPath: String?,
+    ): Boolean {
+        val directMultimodal = imagePath != null || audioPath != null
+        if (!directMultimodal) return true
+        return MEMORY_QUERY.containsMatchIn(prompt)
+    }
     private var nextId = 0L
     private var islandConsumed = 0
     private var started = false
@@ -107,6 +128,7 @@ object ChatController {
                         incoming.text,
                         attachment = incoming.attachment,
                         sessionId = sessionId,
+                        hideText = incoming.hideText,
                     )
                 }
                 if (firstUserMessage) autoTitle(incoming.text)
@@ -127,7 +149,9 @@ object ChatController {
     }
 
     fun send(prompt: String, attachment: ChatAttachment? = null) {
-        val text = prompt.trim().ifBlank {
+        val typed = prompt.trim()
+        val isAudio = attachment?.audioPath != null
+        val text = typed.ifBlank {
             when {
                 attachment?.imagePath != null -> when (LanguageSettings.mode.value) {
                     LanguageMode.NEPALI_DEVANAGARI,
@@ -135,11 +159,20 @@ object ChatController {
                     -> "यो तस्बिरको वर्णन गर्नुहोस्।"
                     else -> "Describe this image."
                 }
+                isAudio -> AUDIO_PROMPT
                 attachment != null -> "What's in this attachment?"
                 else -> ""
             }
         }
-        if (text.isNotEmpty()) pending.trySend(IncomingPrompt(text, attachment))
+        if (text.isNotEmpty()) {
+            pending.trySend(
+                IncomingPrompt(
+                    text = text,
+                    attachment = attachment,
+                    hideText = isAudio && typed.isEmpty(),
+                ),
+            )
+        }
     }
 
     fun setMode(value: ChatMode) {
@@ -270,10 +303,11 @@ object ChatController {
             }
 
             when {
-                attachment?.imagePath != null -> {
+                attachment?.imagePath != null || attachment?.audioPath != null -> {
                     generateLocal(
                         cleaned, assistantId, webBlock, attachmentBlock,
                         attachment.imagePath,
+                        attachment.audioPath,
                     )
                 }
 
@@ -332,11 +366,19 @@ object ChatController {
         webBlock: String? = null,
         attachmentBlock: String? = null,
         imagePath: String? = null,
+        audioPath: String? = null,
     ) {
         if (imagePath != null && ModelManager.chatBackend.value != ChatBackend.LITERT_LM) {
             replace(
                 assistantId,
                 "Image input needs Gemma 4 E2B (.litertlm). Load it in Models to use vision.",
+            )
+            return
+        }
+        if (audioPath != null && ModelManager.chatBackend.value != ChatBackend.LITERT_LM) {
+            replace(
+                assistantId,
+                "Load Gemma 4 E2B (.litertlm) in Models to use direct voice notes.",
             )
             return
         }
@@ -352,14 +394,28 @@ object ChatController {
             prompt,
             webBlock = webBlock,
             attachmentBlock = attachmentBlock,
+            includeMemories = includeMemoryContext(prompt, imagePath, audioPath),
         )
         val turns = _messages.value
             .filter { it.id != assistantId && it.text.isNotBlank() }
             .takeLast(8)
             .map { ChatTurn(it.role, it.text) }
 
+        val modalityInstruction = when {
+            audioPath != null ->
+                "\n\nThe user attached a voice note. Listen to the audio directly and answer " +
+                    "its spoken content naturally. Do not claim that you cannot hear audio."
+            imagePath != null ->
+                "\n\nThe user attached an image. Look at it directly and answer using its contents."
+            else -> null
+        }
+        val promptSystem = if (modalityInstruction != null) {
+            system + modalityInstruction
+        } else {
+            system
+        }
         val speech = if (shouldSpeak()) SentenceSpeechBuffer() else null
-        ModelManager.generateChat(system, turns, imagePath).collect { piece ->
+        ModelManager.generateChat(promptSystem, turns, imagePath, audioPath).collect { piece ->
             append(assistantId, piece)
             speech?.append(piece)
         }
@@ -509,8 +565,9 @@ object ChatController {
         local: Boolean = true,
         webBlock: String? = null,
         attachmentBlock: String? = null,
+        includeMemories: Boolean = true,
     ): String {
-        val memories = retrieveMemories(query)
+        val memories = if (includeMemories) retrieveMemories(query) else emptyList()
         val modelName = ModelManager.chatSelection.value?.displayName
         return buildString {
             if (local) {

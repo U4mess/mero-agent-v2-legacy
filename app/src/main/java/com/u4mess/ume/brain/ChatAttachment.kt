@@ -17,6 +17,7 @@ enum class ChatAttachmentKind(val label: String) {
     PDF("PDF"),
     IMAGE("IMAGE"),
     TEXT("TEXT"),
+    AUDIO("AUDIO"),
 }
 
 data class ChatAttachment(
@@ -25,6 +26,8 @@ data class ChatAttachment(
     val kind: ChatAttachmentKind,
     val text: String,
     val imagePath: String? = null,
+    val audioPath: String? = null,
+    val audioDurationMs: Long = 0L,
 )
 
 object ChatAttachmentStore {
@@ -67,6 +70,7 @@ object ChatAttachmentExtractor {
         val text = when (kind) {
             ChatAttachmentKind.PDF, ChatAttachmentKind.IMAGE ->
                 MediaDocumentIndexer.extractText(uri, mime)
+            ChatAttachmentKind.AUDIO -> ""
             ChatAttachmentKind.TEXT -> runCatching {
                 resolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
             }.getOrDefault("")

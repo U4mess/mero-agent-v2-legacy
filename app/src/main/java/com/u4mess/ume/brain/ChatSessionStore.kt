@@ -96,6 +96,7 @@ object ChatSessionStore {
         put("text", text)
         put("createdAt", createdAt)
         put("proactive", proactive)
+        put("hideText", hideText)
         put("webSources", JSONArray().apply {
             webSources.forEach { source ->
                 put(
@@ -114,7 +115,9 @@ object ChatSessionStore {
                     .put("mimeType", attachment.mimeType)
                     .put("kind", attachment.kind.name)
                     .put("text", attachment.text)
-                    .put("imagePath", attachment.imagePath),
+                    .put("imagePath", attachment.imagePath)
+                    .put("audioPath", attachment.audioPath)
+                    .put("audioDurationMs", attachment.audioDurationMs),
             )
         }
         agent?.let { agent ->
@@ -168,6 +171,8 @@ object ChatSessionStore {
                     .getOrDefault(ChatAttachmentKind.TEXT),
                 text = it.optString("text"),
                 imagePath = it.optString("imagePath").ifBlank { null },
+                audioPath = it.optString("audioPath").ifBlank { null },
+                audioDurationMs = it.optLong("audioDurationMs"),
             )
         }
         val agent = optJSONObject("agent")?.let { source ->
@@ -208,6 +213,7 @@ object ChatSessionStore {
             webSources = webSources,
             attachment = attachment,
             sessionId = sessionId,
+            hideText = optBoolean("hideText"),
         )
     }
 }

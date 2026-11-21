@@ -59,6 +59,7 @@ object LiteRtLmEngine {
         system: String,
         turns: List<ChatTurn>,
         imagePath: String? = null,
+        audioPath: String? = null,
     ): Flow<String> = channelFlow {
         val pair = withContext(dispatcher) {
             closeConversationInternal()
@@ -92,13 +93,14 @@ object LiteRtLmEngine {
         val prompt = pair.second
         try {
             withContext(dispatcher) {
-                val replies = if (imagePath != null) {
-                    activeConversation.sendMessageAsync(
-                        Contents.of(Content.ImageFile(imagePath), Content.Text(prompt)),
-                    )
-                } else {
-                    activeConversation.sendMessageAsync(prompt)
+                val parts = buildList {
+                    imagePath?.let { add(Content.ImageFile(it)) }
+                    audioPath?.let { add(Content.AudioFile(it)) }
+                    add(Content.Text(prompt))
                 }
+                val replies = activeConversation.sendMessageAsync(
+                    Contents.of(*parts.toTypedArray()),
+                )
                 replies.collect { message ->
                     val text = message.toString()
                     if (text.isNotEmpty()) send(text)
@@ -132,6 +134,7 @@ object LiteRtLmEngine {
                     modelPath = modelPath,
                     backend = if (useGpu) Backend.GPU() else Backend.CPU(),
                     visionBackend = if (useGpu) Backend.GPU() else Backend.CPU(),
+                    audioBackend = Backend.CPU(),
                     cacheDir = cacheDir,
                 ),
             )

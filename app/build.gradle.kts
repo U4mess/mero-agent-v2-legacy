@@ -38,8 +38,8 @@ android {
         applicationId = "com.u4mess.ume"
         minSdk = 29
         targetSdk = 35
-        versionCode = 6
-        versionName = "2.3"
+        versionCode = 7
+        versionName = "2.4"
 
         ndk {
             abiFilters += "arm64-v8a"

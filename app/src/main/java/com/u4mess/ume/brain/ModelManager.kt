@@ -138,8 +138,9 @@ object ModelManager {
         system: String,
         turns: List<ChatTurn>,
         imagePath: String? = null,
+        audioPath: String? = null,
     ): Flow<String> = when (chatBackend.value) {
-        ChatBackend.LITERT_LM -> LiteRtLmEngine.generate(system, turns, imagePath)
+        ChatBackend.LITERT_LM -> LiteRtLmEngine.generate(system, turns, imagePath, audioPath)
         ChatBackend.LLAMA_CPP -> LocalLlmEngine.generate(
             LocalLlmEngine.formatPrompt(system, turns),
         )
