@@ -14,6 +14,7 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.speech.tts.Voice
 import android.view.accessibility.AccessibilityManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -48,6 +49,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -123,6 +126,8 @@ import com.u4mess.ume.settings.LanguageMode
 import com.u4mess.ume.settings.LanguageSettings
 import com.u4mess.ume.settings.ThemeMode
 import com.u4mess.ume.settings.ThemeSettings
+import com.u4mess.ume.settings.VoiceEngine
+import com.u4mess.ume.settings.VoiceSettings
 import com.u4mess.ume.settings.WebSearchSettings
 import com.u4mess.ume.ui.components.UmeCard
 import com.u4mess.ume.ui.components.UmeSectionHeader
@@ -388,7 +393,15 @@ fun SettingsScreen() {
     }
     val mediaIndexEnabled by MediaDocumentIndexer.enabled.collectAsState()
     val voiceReplies by VoiceOutputManager.enabled.collectAsState()
-    val speechRate by VoiceOutputManager.rate.collectAsState()
+    val voiceEngine by VoiceSettings.engine.collectAsState()
+    val nepaliVoiceName by VoiceSettings.nepaliSystemVoiceName.collectAsState()
+    val englishVoiceName by VoiceSettings.englishSystemVoiceName.collectAsState()
+    val voiceRate by VoiceSettings.rate.collectAsState()
+    val voicePitch by VoiceSettings.pitch.collectAsState()
+    val cloudNepaliVoice by VoiceSettings.cloudNepaliVoice.collectAsState()
+    val azureRegion by VoiceSettings.azureRegion.collectAsState()
+    var azureKey by remember { mutableStateOf(VoiceSettings.azureKey().orEmpty()) }
+    var azureSaved by remember { mutableStateOf(VoiceSettings.hasAzureKey()) }
     var braveKey by remember { mutableStateOf(WebSearchSettings.apiKey().orEmpty()) }
     var braveSaved by remember { mutableStateOf(WebSearchSettings.hasKey()) }
 
@@ -786,7 +799,7 @@ fun SettingsScreen() {
             contentPadding = PaddingValues(0.dp),
         ) {
             UmeSectionHeader(
-                title = "Voice",
+                title = "Voice & Speech",
                 modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp),
             )
             Row(
@@ -820,27 +833,186 @@ fun SettingsScreen() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    VoiceEngine.entries.forEach { option ->
+                        ModelOptionPill(
+                            label = option.label,
+                            selected = voiceEngine == option,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            VoiceSettings.setEngine(option)
+                            VoiceOutputManager.refreshAudioSettings()
+                        }
+                    }
+                }
+
+                VoicePickerRow(
+                    label = "Nepali Voice",
+                    voices = VoiceOutputManager.availableNepaliVoices(),
+                    selectedName = nepaliVoiceName,
+                    onSelect = { VoiceSettings.setNepaliSystemVoice(it) },
+                    onTest = {
+                        VoiceOutputManager.enqueueSentence(
+                            "नमस्ते, म मेरो एजेन्ट हुँ।",
+                        )
+                    },
+                )
+                VoicePickerRow(
+                    label = "English Voice",
+                    voices = VoiceOutputManager.availableEnglishVoices(),
+                    selectedName = englishVoiceName,
+                    onSelect = { VoiceSettings.setEnglishSystemVoice(it) },
+                )
+
+                if (voiceEngine == VoiceEngine.CLOUD_NEURAL) {
+                    Text(
+                        text = "Nepali Neural Voice",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ModelOptionPill(
+                            label = "Hemkala",
+                            selected = cloudNepaliVoice == VoiceSettings.HEMKALA,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            VoiceSettings.setCloudNepaliVoice(VoiceSettings.HEMKALA)
+                        }
+                        ModelOptionPill(
+                            label = "Sagar",
+                            selected = cloudNepaliVoice == VoiceSettings.SAGAR,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            VoiceSettings.setCloudNepaliVoice(VoiceSettings.SAGAR)
+                        }
+                    }
+                    Text(
+                        text = "Azure Region",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("centralindia", "uaenorth").forEach { region ->
+                            ModelOptionPill(
+                                label = region,
+                                selected = azureRegion == region,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                VoiceSettings.setAzureRegion(region)
+                            }
+                        }
+                    }
+                    Text(
+                        text = "Azure Speech Key",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Black)
+                            .border(0.75.dp, Border, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BasicTextField(
+                            value = azureKey,
+                            onValueChange = { azureKey = it },
+                            singleLine = true,
+                            textStyle = TextStyle(color = TextPrimary, fontSize = 12.sp),
+                            cursorBrush = SolidColor(TextPrimary),
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            modifier = Modifier.weight(1f),
+                            decorationBox = { innerTextField ->
+                                Box {
+                                    if (azureKey.isEmpty()) {
+                                        Text(
+                                            "Azure Speech key",
+                                            color = TextSecondary,
+                                            fontSize = 11.sp,
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            },
+                        )
+                        Text(
+                            text = "Save",
+                            color = Black,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(TextPrimary)
+                                .clickable(enabled = azureKey.isNotBlank()) {
+                                    VoiceSettings.setAzureKey(azureKey)
+                                    azureSaved = VoiceSettings.hasAzureKey()
+                                }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                        )
+                        if (azureSaved) {
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = "Clear",
+                                color = TextSecondary,
+                                fontSize = 10.sp,
+                                modifier = Modifier
+                                    .clickable {
+                                        VoiceSettings.setAzureKey("")
+                                        azureKey = ""
+                                        azureSaved = false
+                                    }
+                                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                }
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "Speech rate",
+                        text = "Speed",
                         color = TextPrimary,
                         fontSize = 14.sp,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        text = String.format(Locale.US, "%.2fx", speechRate),
+                        text = String.format(Locale.US, "%.2fx", voiceRate),
                         color = TextSecondary,
                         fontSize = 12.sp,
                     )
                 }
                 UmeSlider(
-                    value = speechRate,
+                    value = voiceRate,
                     onValueChange = { VoiceOutputManager.setRate(it) },
-                    valueRange = 0.8f..1.5f,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 2.dp),
+                    valueRange = 0.75f..1.30f,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Pitch",
+                        color = TextPrimary,
+                        fontSize = 14.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = String.format(Locale.US, "%.2f", voicePitch),
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                UmeSlider(
+                    value = voicePitch,
+                    onValueChange = { VoiceOutputManager.setPitch(it) },
+                    valueRange = 0.80f..1.20f,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -1937,6 +2109,101 @@ private fun PermissionRow(
         }
         TextButton(onClick = onOpen) {
             Text(actionLabel, color = TextPrimary, fontSize = 13.sp)
+        }
+    }
+}
+
+@Composable
+private fun VoicePickerRow(
+    label: String,
+    voices: List<Voice>,
+    selectedName: String?,
+    onSelect: (String?) -> Unit,
+    onTest: (() -> Unit)? = null,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = label,
+                color = TextPrimary,
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f),
+            )
+            if (onTest != null) {
+                Text(
+                    text = "Test",
+                    color = Accent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onTest)
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                )
+            }
+        }
+        Box {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Black)
+                    .border(0.75.dp, Border, RoundedCornerShape(12.dp))
+                    .clickable { expanded = true }
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = selectedName ?: "Best available",
+                    color = TextPrimary,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("\u25BE", color = TextSecondary, fontSize = 10.sp)
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                DropdownMenuItem(
+                    text = { Text("Best available", color = TextPrimary, fontSize = 12.sp) },
+                    onClick = {
+                        onSelect(null)
+                        expanded = false
+                    },
+                )
+                voices.forEach { voice ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(
+                                    text = voice.name,
+                                    color = TextPrimary,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = "${voice.locale.toLanguageTag()} \u00B7 quality ${voice.quality}",
+                                    color = TextSecondary,
+                                    fontSize = 9.sp,
+                                )
+                            }
+                        },
+                        onClick = {
+                            onSelect(voice.name)
+                            expanded = false
+                        },
+                    )
+                }
+                if (voices.isEmpty()) {
+                    DropdownMenuItem(
+                        text = { Text("No installed voices yet", color = TextSecondary, fontSize = 11.sp) },
+                        onClick = { expanded = false },
+                    )
+                }
+            }
         }
     }
 }

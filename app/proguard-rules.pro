@@ -35,6 +35,9 @@
 -keep class com.u4mess.ume.memory.MemoryEntity { *; }
 -keep class com.u4mess.ume.memory.MemoryBackupManager { *; }
 -keep class com.u4mess.ume.memory.MemoryRepository { *; }
+-keep class com.u4mess.ume.settings.VoiceSettings { *; }
+-keep class com.u4mess.ume.settings.LanguageSettings { *; }
+-keep enum com.u4mess.ume.settings.** { *; }
 
 # PDFBox-Android and optional logging/XML backends.
 -keep class com.tom_roush.pdfbox.** { *; }

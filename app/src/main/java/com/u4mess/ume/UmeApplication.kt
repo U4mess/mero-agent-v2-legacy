@@ -16,6 +16,7 @@ import com.u4mess.ume.service.IslandSettings
 import com.u4mess.ume.settings.CloudSettings
 import com.u4mess.ume.settings.LanguageSettings
 import com.u4mess.ume.settings.ThemeSettings
+import com.u4mess.ume.settings.VoiceSettings
 import com.u4mess.ume.settings.WebSearchSettings
 import com.u4mess.ume.voice.VoiceInputManager
 import com.u4mess.ume.voice.VoiceOutputManager
@@ -45,6 +46,7 @@ class UmeApplication : Application() {
         ThemeSettings.init(this)
         LanguageSettings.init(this)
         IslandSettings.init(this)
+        VoiceSettings.init(this)
         VoiceInputManager.init(this)
         VoiceOutputManager.init(this)
         ChatController.start(this, memoryRepository)
