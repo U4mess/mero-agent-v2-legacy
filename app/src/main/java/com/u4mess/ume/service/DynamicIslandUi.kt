@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,6 +36,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
@@ -64,6 +66,7 @@ internal fun DynamicIsland(
     partialTranscript: String,
     rmsLevel: Float,
     onMicClick: () -> Unit,
+    onTalkClick: () -> Unit,
     onApprove: () -> Unit,
     onCancelApproval: () -> Unit,
     onExpand: () -> Unit,
@@ -208,7 +211,12 @@ internal fun DynamicIsland(
             }
         } else if (expanded) {
             UmeMonkeyFace(
-                Modifier.size(22.dp),
+                Modifier
+                    .size(22.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures(onLongPress = { onTalkClick() })
+                    }
+                    .semantics { contentDescription = "Long press for Talk mode" },
                 mood = if (isListening) MonkeyMood.ACTING else MonkeyMood.THINKING,
             )
             Spacer(Modifier.width(8.dp))

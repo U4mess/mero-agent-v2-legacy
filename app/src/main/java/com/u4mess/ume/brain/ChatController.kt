@@ -8,6 +8,8 @@ import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
 import com.u4mess.ume.service.IslandAgent
 import com.u4mess.ume.service.PromptInbox
 import com.u4mess.ume.settings.CloudSettings
+import com.u4mess.ume.voice.VoiceChatSession
+import com.u4mess.ume.voice.VoiceOutputManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -180,7 +182,12 @@ object ChatController {
             .map { ChatTurn(it.role, it.text) }
 
         val formatted = LocalLlmEngine.formatPrompt(system, turns)
-        LocalLlmEngine.generate(formatted).collect { piece -> append(assistantId, piece) }
+        val speech = if (shouldSpeak()) SentenceSpeechBuffer() else null
+        LocalLlmEngine.generate(formatted).collect { piece ->
+            append(assistantId, piece)
+            speech?.append(piece)
+        }
+        speech?.flush()
 
         if (textOf(assistantId).isBlank()) {
             replace(assistantId, "The model returned no text.")
@@ -210,7 +217,14 @@ object ChatController {
 
         CloudLlmClient.chatCompletion(turns, system).fold(
             onSuccess = { answer ->
-                replace(assistantId, answer.trim().ifBlank { "The cloud model returned no text." })
+                val cleanAnswer = answer.trim().ifBlank { "The cloud model returned no text." }
+                replace(assistantId, cleanAnswer)
+                if (shouldSpeak()) {
+                    SentenceSpeechBuffer().apply {
+                        append(cleanAnswer)
+                        flush()
+                    }
+                }
             },
             onFailure = { throwable ->
                 replace(
@@ -277,6 +291,7 @@ object ChatController {
             setAgent(assistantId, stopped)
             IslandAgent.finish("Stopped")
             recordAction(goal, "Stopped by user.", emptyList())
+            speakAgentSummary(stopped)
         } else {
             val stopped = result.message.contains("stopped", ignoreCase = true)
             val summary = when {
@@ -294,6 +309,7 @@ object ChatController {
                 },
             )
             recordAction(goal, summary, result.steps)
+            speakAgentSummary(result)
         }
 
         scope.launch {
@@ -359,6 +375,53 @@ object ChatController {
                     }
                 },
             )
+        }
+    }
+
+    private fun shouldSpeak(): Boolean =
+        (VoiceOutputManager.enabled.value || VoiceChatSession.active.value) &&
+            !VoiceChatSession.muted.value
+
+    private fun speakAgentSummary(result: UiAgentResult) {
+        if (!shouldSpeak()) return
+        val line = result.details.lastOrNull()?.detail
+            ?.lineSequence()
+            ?.firstOrNull()
+            ?.trim()
+            .orEmpty()
+            .ifBlank {
+                result.message.lineSequence().firstOrNull()?.trim().orEmpty()
+            }
+        if (line.isNotBlank()) {
+            VoiceOutputManager.enqueueSentence(line.take(180))
+        }
+    }
+
+    private class SentenceSpeechBuffer {
+        private val buffer = StringBuilder()
+
+        fun append(text: String) {
+            buffer.append(text)
+            while (true) {
+                val boundary = firstBoundary()
+                if (boundary < 0) return
+                val sentence = buffer.substring(0, boundary + 1).trim()
+                buffer.delete(0, boundary + 1)
+                if (sentence.length >= 2) VoiceOutputManager.enqueueSentence(sentence)
+            }
+        }
+
+        fun flush() {
+            val remainder = buffer.toString().trim()
+            buffer.clear()
+            if (remainder.isNotEmpty()) VoiceOutputManager.enqueueSentence(remainder)
+        }
+
+        private fun firstBoundary(): Int {
+            for (index in buffer.indices) {
+                if (buffer[index] in charArrayOf('.', '!', '?', '\n')) return index
+            }
+            return -1
         }
     }
 

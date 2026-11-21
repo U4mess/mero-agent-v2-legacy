@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +48,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.u4mess.ume.brain.ChatController
+import com.u4mess.ume.voice.VoiceChatSession
+import kotlinx.coroutines.flow.collect
 
 private enum class Tab(val label: String) {
     Chat("Chat"),
@@ -68,6 +71,12 @@ fun UmeApp() {
     val generating by ChatController.generating.collectAsState()
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val layoutDirection = LocalLayoutDirection.current
+
+    LaunchedEffect(Unit) {
+        VoiceChatSession.openRequests.collect { request ->
+            if (request > 0) tab = Tab.Chat
+        }
+    }
 
     Scaffold(
         containerColor = Black,

@@ -11,10 +11,12 @@ import com.u4mess.ume.memory.MemoryEntity
 import com.u4mess.ume.memory.MemoryRepository
 import com.u4mess.ume.memory.MyObjectBox
 import com.u4mess.ume.memory.NightlyConsolidator
+import com.u4mess.ume.sensors.MediaDocumentIndexer
 import com.u4mess.ume.service.IslandSettings
 import com.u4mess.ume.settings.CloudSettings
 import com.u4mess.ume.settings.ThemeSettings
 import com.u4mess.ume.voice.VoiceInputManager
+import com.u4mess.ume.voice.VoiceOutputManager
 import io.objectbox.BoxStore
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -40,7 +42,9 @@ class UmeApplication : Application() {
         ThemeSettings.init(this)
         IslandSettings.init(this)
         VoiceInputManager.init(this)
+        VoiceOutputManager.init(this)
         ChatController.start(this, memoryRepository)
+        MediaDocumentIndexer.init(this, memoryRepository)
         scheduleNightlyConsolidation()
         autoLoadModels()
     }

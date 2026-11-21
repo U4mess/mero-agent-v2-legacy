@@ -40,6 +40,7 @@ import com.u4mess.ume.MainActivity
 import com.u4mess.ume.R
 import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
 import com.u4mess.ume.ui.UmeTheme
+import com.u4mess.ume.voice.VoiceChatSession
 import com.u4mess.ume.voice.VoiceInputManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -90,6 +91,7 @@ class DynamicIslandService : Service() {
                         partialTranscript = partialTranscript,
                         rmsLevel = rmsLevel,
                         onMicClick = { onMicPressed() },
+                        onTalkClick = { onTalkPressed() },
                         onApprove = { IslandAgent.approve() },
                         onCancelApproval = { IslandAgent.cancelApproval() },
                         onExpand = {
@@ -236,6 +238,15 @@ class DynamicIslandService : Service() {
                 islandView.clearFocus()
             }
         }
+    }
+
+    private fun onTalkPressed() {
+        setExpanded(false)
+        VoiceChatSession.requestOpen()
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
     }
 
     private fun onMicPressed() {

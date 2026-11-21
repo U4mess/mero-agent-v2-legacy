@@ -4,6 +4,7 @@ import android.Manifest
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -45,8 +46,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -63,6 +66,7 @@ import com.u4mess.ume.brain.ChatRole
 import com.u4mess.ume.brain.UiAgentResult
 import com.u4mess.ume.service.ApprovalRequest
 import com.u4mess.ume.service.IslandAgent
+import com.u4mess.ume.voice.VoiceChatSession
 import com.u4mess.ume.voice.VoiceInputManager
 import java.time.Instant
 import java.time.ZoneId
@@ -108,6 +112,7 @@ fun ChatScreen() {
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val context = LocalContext.current
     var input by rememberSaveable { mutableStateOf("") }
+    var showVoiceChat by rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val inputFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -179,6 +184,15 @@ fun ChatScreen() {
         }
     }
 
+    LaunchedEffect(Unit) {
+        VoiceChatSession.openRequests.collect { request ->
+            if (request > 0) {
+                showVoiceChat = true
+                VoiceChatSession.consumeOpenRequest()
+            }
+        }
+    }
+
     LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length) {
         if (messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex)
     }
@@ -194,6 +208,7 @@ fun ChatScreen() {
             generating = generating,
             mode = mode,
             onModeChange = ChatController::setMode,
+            onTalk = { showVoiceChat = true },
             onStop = { ChatController.stop() },
         )
 
@@ -243,6 +258,10 @@ fun ChatScreen() {
             },
         )
     }
+
+    if (showVoiceChat) {
+        VoiceChatSheet(onDismiss = { showVoiceChat = false })
+    }
 }
 
 @Composable
@@ -252,6 +271,7 @@ private fun ChatHeader(
     generating: Boolean,
     mode: ChatMode,
     onModeChange: (ChatMode) -> Unit,
+    onTalk: () -> Unit,
     onStop: () -> Unit,
 ) {
     Column(
@@ -277,7 +297,9 @@ private fun ChatHeader(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            TalkModeButton(onClick = onTalk)
             if (generating) {
+                Spacer(Modifier.width(6.dp))
                 Text(
                     text = "Stop",
                     color = TextPrimary,
@@ -287,7 +309,7 @@ private fun ChatHeader(
                         .background(Elevated)
                         .border(1.dp, Border, RoundedCornerShape(12.dp))
                         .clickable(onClick = onStop)
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
                 )
             }
         }
@@ -309,6 +331,40 @@ private fun ChatHeader(
                 Spacer(Modifier.width(5.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun TalkModeButton(onClick: () -> Unit) {
+    val tint = TextPrimary
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Elevated)
+            .border(1.dp, Border, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Canvas(Modifier.size(13.dp)) {
+            val w = size.width
+            val h = size.height
+            val stroke = 1.4.dp.toPx()
+            val heights = listOf(0.35f, 0.72f, 0.5f)
+            heights.forEachIndexed { index, fraction ->
+                val x = w * (0.22f + index * 0.28f)
+                val half = h * fraction / 2f
+                drawLine(
+                    color = tint,
+                    start = Offset(x, h / 2f - half),
+                    end = Offset(x, h / 2f + half),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
+        Spacer(Modifier.width(5.dp))
+        Text("Talk", color = TextPrimary, fontSize = 11.sp)
     }
 }
 

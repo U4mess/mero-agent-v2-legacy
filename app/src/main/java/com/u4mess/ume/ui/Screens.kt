@@ -1,4 +1,4 @@
-﻿package com.u4mess.ume.ui
+package com.u4mess.ume.ui
 
 import android.Manifest
 import android.accessibilityservice.AccessibilityServiceInfo
@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
 import android.os.BatteryManager
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
@@ -107,6 +108,7 @@ import com.u4mess.ume.brain.ModelStatus
 import com.u4mess.ume.memory.MemoryEntity
 import com.u4mess.ume.memory.MemorySource
 import com.u4mess.ume.memory.NightlyConsolidator
+import com.u4mess.ume.sensors.MediaDocumentIndexer
 import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
 import com.u4mess.ume.service.DynamicIslandService
 import com.u4mess.ume.service.IslandSettings
@@ -115,6 +117,7 @@ import com.u4mess.ume.settings.CloudProvider
 import com.u4mess.ume.settings.CloudSettings
 import com.u4mess.ume.settings.ThemeMode
 import com.u4mess.ume.settings.ThemeSettings
+import com.u4mess.ume.voice.VoiceOutputManager
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -133,6 +136,28 @@ fun MemoryScreen() {
     val connected by ScreenReaderAccessibilityService.connected.collectAsState()
     val revisions by repository.revisions.collectAsState()
     val scope = rememberCoroutineScope()
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            scope.launch(Dispatchers.IO) {
+                val indexed = MediaDocumentIndexer.indexUri(uri, null)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        context,
+                        if (indexed) "Document indexed" else "Nothing to index",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
 
     var keyword by rememberSaveable { mutableStateOf("") }
     var sourceFilter by rememberSaveable { mutableStateOf("") }
@@ -185,23 +210,38 @@ fun MemoryScreen() {
             .imePadding(),
     ) {
         ScreenHeader("Memory") {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Elevated)
-                    .border(1.dp, Border, RoundedCornerShape(12.dp))
-                    .clickable(onClick = captureScreen)
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier
-                        .size(5.dp)
-                        .clip(CircleShape)
-                        .background(if (connected) TextPrimary else TextSecondary),
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Elevated)
+                        .border(1.dp, Border, RoundedCornerShape(12.dp))
+                        .clickable(onClick = captureScreen)
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(if (connected) TextPrimary else TextSecondary),
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Text("Capture screen", color = TextPrimary, fontSize = 12.sp)
+                }
+                Text(
+                    text = "Import",
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Elevated)
+                        .border(1.dp, Border, RoundedCornerShape(12.dp))
+                        .clickable {
+                            importLauncher.launch(arrayOf("application/pdf", "image/*"))
+                        }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
                 )
-                Spacer(Modifier.width(7.dp))
-                Text("Capture screen", color = TextPrimary, fontSize = 12.sp)
             }
         }
 
@@ -238,6 +278,16 @@ fun MemoryScreen() {
                 item {
                     FilterPill("Summaries", sourceFilter == MemorySource.SUMMARY) {
                         sourceFilter = MemorySource.SUMMARY
+                    }
+                }
+                item {
+                    FilterPill("Screenshots", sourceFilter == MemorySource.SCREENSHOT) {
+                        sourceFilter = MemorySource.SCREENSHOT
+                    }
+                }
+                item {
+                    FilterPill("PDFs", sourceFilter == MemorySource.PDF) {
+                        sourceFilter = MemorySource.PDF
                     }
                 }
             }
@@ -296,7 +346,10 @@ fun SettingsScreen() {
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) refresh++
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refresh++
+                MediaDocumentIndexer.refresh(context)
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -305,6 +358,23 @@ fun SettingsScreen() {
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { refresh++ }
+    val mediaPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        refresh++
+        if (granted) MediaDocumentIndexer.refresh(context)
+    }
+    val mediaPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        Manifest.permission.READ_MEDIA_IMAGES
+    } else {
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+    val mediaGranted = remember(refresh) {
+        MediaDocumentIndexer.hasMediaPermission(context)
+    }
+    val mediaIndexEnabled by MediaDocumentIndexer.enabled.collectAsState()
+    val voiceReplies by VoiceOutputManager.enabled.collectAsState()
+    val speechRate by VoiceOutputManager.rate.collectAsState()
 
     val overlayGranted = remember(refresh) { Settings.canDrawOverlays(context) }
     val microphoneGranted = remember(refresh) {
@@ -429,6 +499,55 @@ fun SettingsScreen() {
                 } else {
                     micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
+            }
+            RowDivider()
+            PermissionRow(
+                title = "Photos & Screenshots",
+                granted = mediaGranted,
+                actionLabel = if (mediaGranted) "Open" else "Grant",
+            ) {
+                if (mediaGranted) {
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:${context.packageName}"),
+                        ),
+                    )
+                } else {
+                    mediaPermissionLauncher.launch(mediaPermission)
+                }
+            }
+            RowDivider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Auto-index Screenshots & PDFs", color = TextPrimary, fontSize = 15.sp)
+                    Text(
+                        text = when {
+                            !mediaGranted -> "Grant Photos access to scan"
+                            mediaIndexEnabled -> "On"
+                            else -> "Off"
+                        },
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                Switch(
+                    checked = mediaIndexEnabled,
+                    onCheckedChange = { MediaDocumentIndexer.setEnabled(context, it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Black,
+                        checkedTrackColor = TextPrimary,
+                        checkedBorderColor = TextPrimary,
+                        uncheckedThumbColor = TextSecondary,
+                        uncheckedTrackColor = Elevated,
+                        uncheckedBorderColor = Border,
+                    ),
+                )
             }
             RowDivider()
             PermissionRow("Battery unrestricted", batteryUnrestricted) {
@@ -591,6 +710,86 @@ fun SettingsScreen() {
                         IslandSettings.persistXOffset(xOffset.roundToInt())
                     },
                     valueRange = IslandSettings.MIN_X_OFFSET_DP.toFloat()..IslandSettings.MAX_X_OFFSET_DP.toFloat(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = TextPrimary,
+                        activeTrackColor = TextPrimary,
+                        inactiveTrackColor = Border,
+                        activeTickColor = TextPrimary,
+                        inactiveTickColor = Border,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .shadow(3.dp, RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(24.dp))
+                .background(Elevated)
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+        ) {
+            Text(
+                text = "Voice",
+                color = TextSecondary,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Voice replies (TTS)", color = TextPrimary, fontSize = 15.sp)
+                    Text(
+                        text = if (voiceReplies) "Ume reads replies aloud" else "Off",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                Switch(
+                    checked = voiceReplies,
+                    onCheckedChange = { VoiceOutputManager.setEnabled(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Black,
+                        checkedTrackColor = TextPrimary,
+                        checkedBorderColor = TextPrimary,
+                        uncheckedThumbColor = TextSecondary,
+                        uncheckedTrackColor = Elevated,
+                        uncheckedBorderColor = Border,
+                    ),
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Speech rate",
+                        color = TextPrimary,
+                        fontSize = 14.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = String.format(Locale.US, "%.2fx", speechRate),
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                Slider(
+                    value = speechRate,
+                    onValueChange = { VoiceOutputManager.setRate(it) },
+                    valueRange = 0.8f..1.5f,
                     colors = SliderDefaults.colors(
                         thumbColor = TextPrimary,
                         activeTrackColor = TextPrimary,
@@ -1253,7 +1452,7 @@ private fun MemoryDetailSheet(memory: MemoryEntity, onDismiss: () -> Unit) {
 private fun BentoSourceIcon(source: String) {
     val tint = when (source) {
         MemorySource.ACTION -> AmberAccent
-        MemorySource.SUMMARY -> Color(0xFFB07A52)
+        MemorySource.SUMMARY, MemorySource.PDF -> Color(0xFFB07A52)
         else -> TextSecondary
     }
     Canvas(Modifier.size(12.dp)) {
@@ -1282,7 +1481,7 @@ private fun BentoSourceIcon(source: String) {
                 drawPath(tail, tint, style = stroke)
             }
 
-            MemorySource.SCREEN -> {
+            MemorySource.SCREEN, MemorySource.SCREENSHOT -> {
                 drawRoundRect(
                     color = tint,
                     topLeft = Offset(w * 0.12f, h * 0.18f),
@@ -1292,6 +1491,19 @@ private fun BentoSourceIcon(source: String) {
                 )
                 drawLine(tint, Offset(w * 0.28f, h * 0.42f), Offset(w * 0.72f, h * 0.42f), 1.1.dp.toPx(), StrokeCap.Round)
                 drawLine(tint, Offset(w * 0.28f, h * 0.62f), Offset(w * 0.58f, h * 0.62f), 1.1.dp.toPx(), StrokeCap.Round)
+            }
+
+            MemorySource.PDF -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(w * 0.2f, h * 0.1f),
+                    size = Size(w * 0.6f, h * 0.8f),
+                    cornerRadius = CornerRadius(w * 0.08f),
+                    style = stroke,
+                )
+                drawLine(tint, Offset(w * 0.32f, h * 0.36f), Offset(w * 0.68f, h * 0.36f), 1.1.dp.toPx(), StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.32f, h * 0.54f), Offset(w * 0.68f, h * 0.54f), 1.1.dp.toPx(), StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.32f, h * 0.72f), Offset(w * 0.56f, h * 0.72f), 1.1.dp.toPx(), StrokeCap.Round)
             }
 
             MemorySource.ACTION -> {
@@ -1349,6 +1561,8 @@ private fun memorySourceLabel(source: String): String = when (source) {
     MemorySource.SCREEN -> "SCREEN"
     MemorySource.ACTION -> "ACTION"
     MemorySource.SUMMARY -> "SUMMARY"
+    MemorySource.SCREENSHOT -> "SCREENSHOT"
+    MemorySource.PDF -> "PDF"
     else -> source.uppercase(Locale.getDefault())
 }
 
@@ -1357,6 +1571,8 @@ private fun memoryFallbackTitle(source: String): String = when (source) {
     MemorySource.SCREEN -> "Screen capture"
     MemorySource.ACTION -> "Agent action"
     MemorySource.SUMMARY -> "Daily summary"
+    MemorySource.SCREENSHOT -> "Screenshot"
+    MemorySource.PDF -> "PDF Document"
     else -> "Memory"
 }
 
