@@ -14,6 +14,7 @@ import com.u4mess.ume.memory.NightlyConsolidator
 import com.u4mess.ume.sensors.MediaDocumentIndexer
 import com.u4mess.ume.service.IslandSettings
 import com.u4mess.ume.settings.CloudSettings
+import com.u4mess.ume.settings.LanguageSettings
 import com.u4mess.ume.settings.ThemeSettings
 import com.u4mess.ume.settings.WebSearchSettings
 import com.u4mess.ume.voice.VoiceInputManager
@@ -42,6 +43,7 @@ class UmeApplication : Application() {
         CloudSettings.init(this)
         WebSearchSettings.init(this)
         ThemeSettings.init(this)
+        LanguageSettings.init(this)
         IslandSettings.init(this)
         VoiceInputManager.init(this)
         VoiceOutputManager.init(this)

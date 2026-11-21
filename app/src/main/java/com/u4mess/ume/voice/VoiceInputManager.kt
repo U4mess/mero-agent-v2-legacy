@@ -11,6 +11,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.core.content.ContextCompat
+import com.u4mess.ume.settings.LanguageSettings
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -94,7 +95,13 @@ object VoiceInputManager {
                     RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
                 )
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                LanguageSettings.speechLanguage()?.let { language ->
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language)
+                } ?: putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE,
+                    Locale.getDefault().toLanguageTag(),
+                )
             }
 
             runCatching { recognizer?.startListening(intent) }.onFailure { throwable ->

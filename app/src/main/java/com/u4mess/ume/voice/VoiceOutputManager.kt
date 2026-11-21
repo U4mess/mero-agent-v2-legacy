@@ -1,6 +1,7 @@
 package com.u4mess.ume.voice
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
@@ -29,6 +30,7 @@ object VoiceOutputManager {
     private var nextUtteranceId = 0
     private var pendingUtterances = 0
     private val bufferedSentences = mutableListOf<String>()
+    private val devanagari = Regex("[\\u0900-\\u097F]")
 
     private val _enabled = MutableStateFlow(false)
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
@@ -104,6 +106,19 @@ object VoiceOutputManager {
         }
     }
 
+    fun requestInstallNepaliVoiceData(context: Context) {
+        val engine = tts
+        val status = engine?.isLanguageAvailable(Locale("ne", "NP"))
+            ?: TextToSpeech.LANG_MISSING_DATA
+        if (status >= TextToSpeech.LANG_AVAILABLE) return
+        runCatching {
+            context.startActivity(
+                Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+
     fun stop() {
         mainHandler.post {
             bufferedSentences.clear()
@@ -127,6 +142,14 @@ object VoiceOutputManager {
 
     private fun speak(sentence: String) {
         val engine = tts ?: return
+        if (devanagari.containsMatchIn(sentence)) {
+            val status = engine.setLanguage(Locale("ne", "NP"))
+            if (status < TextToSpeech.LANG_AVAILABLE) {
+                engine.setLanguage(Locale.getDefault())
+            }
+        } else {
+            engine.setLanguage(Locale.US)
+        }
         pendingUtterances++
         _isSpeaking.value = true
         val utteranceId = "ume-${nextUtteranceId++}"

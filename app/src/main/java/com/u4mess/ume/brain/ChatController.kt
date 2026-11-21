@@ -10,6 +10,7 @@ import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
 import com.u4mess.ume.service.IslandAgent
 import com.u4mess.ume.service.PromptInbox
 import com.u4mess.ume.settings.CloudSettings
+import com.u4mess.ume.settings.LanguageSettings
 import com.u4mess.ume.settings.WebSearchSettings
 import com.u4mess.ume.voice.VoiceChatSession
 import com.u4mess.ume.voice.VoiceOutputManager
@@ -486,6 +487,8 @@ object ChatController {
             } else {
                 append("You are Mero Agent, a helpful AI assistant with access to the user's memories.")
             }
+            append(" ")
+            append(LanguageSettings.promptDirective())
             append(" Answer directly and concisely.")
             if (memories.isNotEmpty()) {
                 append("\n\nRelevant memories from this device:\n")
@@ -586,7 +589,7 @@ object ChatController {
 
         private fun firstBoundary(): Int {
             for (index in buffer.indices) {
-                if (buffer[index] in charArrayOf('.', '!', '?', '\n')) return index
+                if (buffer[index] in charArrayOf('.', '!', '?', '\n', '\u0964', '\u0965')) return index
             }
             return -1
         }

@@ -119,6 +119,8 @@ import com.u4mess.ume.service.IslandSettings
 import com.u4mess.ume.service.IslandState
 import com.u4mess.ume.settings.CloudProvider
 import com.u4mess.ume.settings.CloudSettings
+import com.u4mess.ume.settings.LanguageMode
+import com.u4mess.ume.settings.LanguageSettings
 import com.u4mess.ume.settings.ThemeMode
 import com.u4mess.ume.settings.ThemeSettings
 import com.u4mess.ume.settings.WebSearchSettings
@@ -413,6 +415,7 @@ fun SettingsScreen() {
     }
     val islandRunning by IslandState.running.collectAsState()
     val themeMode by ThemeSettings.mode.collectAsState()
+    val languageMode by LanguageSettings.mode.collectAsState()
     val cloudEnabled by CloudSettings.enabled.collectAsState()
     val cloudProvider by CloudSettings.provider.collectAsState()
     val cloudModel by CloudSettings.model.collectAsState()
@@ -468,6 +471,60 @@ fun SettingsScreen() {
                         }
                     }
                 }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        UmeCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            UmeSectionHeader(
+                title = "Language",
+                modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 8.dp),
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LanguageMode.entries.take(2).forEach { option ->
+                        ModelOptionPill(
+                            label = option.label,
+                            selected = languageMode == option,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            LanguageSettings.setMode(option)
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LanguageMode.entries.drop(2).forEach { option ->
+                        ModelOptionPill(
+                            label = option.label,
+                            selected = languageMode == option,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            LanguageSettings.setMode(option)
+                        }
+                    }
+                }
+                Text(
+                    text = "Install Nepali Voice Data",
+                    color = Accent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clickable {
+                            VoiceOutputManager.requestInstallNepaliVoiceData(context)
+                        }
+                        .padding(vertical = 4.dp),
+                )
             }
         }
 
