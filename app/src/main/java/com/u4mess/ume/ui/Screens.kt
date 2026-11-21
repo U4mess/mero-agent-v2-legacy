@@ -1,5 +1,6 @@
-package com.u4mess.ume.ui
+﻿package com.u4mess.ume.ui
 
+import android.Manifest
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.BroadcastReceiver
 import android.content.ClipData
@@ -14,6 +15,8 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -90,9 +93,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.lifecycle.Lifecycle
@@ -299,7 +302,15 @@ fun SettingsScreen() {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { refresh++ }
+
     val overlayGranted = remember(refresh) { Settings.canDrawOverlays(context) }
+    val microphoneGranted = remember(refresh) {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
     val notificationAccess = remember(refresh) {
         NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
     }
@@ -401,6 +412,23 @@ fun SettingsScreen() {
             RowDivider()
             PermissionRow("Accessibility", accessibilityGranted) {
                 context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+            RowDivider()
+            PermissionRow(
+                title = "Microphone",
+                granted = microphoneGranted,
+                actionLabel = if (microphoneGranted) "Open" else "Grant",
+            ) {
+                if (microphoneGranted) {
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:${context.packageName}"),
+                        ),
+                    )
+                } else {
+                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
             }
             RowDivider()
             PermissionRow("Battery unrestricted", batteryUnrestricted) {
@@ -895,7 +923,7 @@ private fun MemorySearchField(value: String, onValueChange: (String) -> Unit) {
         )
         if (value.isNotEmpty()) {
             Text(
-                text = "Ã—",
+                text = "Ãƒâ€”",
                 color = TextSecondary,
                 fontSize = 16.sp,
                 modifier = Modifier
@@ -1405,7 +1433,12 @@ internal fun EmptyState(title: String, body: String, modifier: Modifier = Modifi
 }
 
 @Composable
-private fun PermissionRow(title: String, granted: Boolean, onOpen: () -> Unit) {
+private fun PermissionRow(
+    title: String,
+    granted: Boolean,
+    actionLabel: String = "Open",
+    onOpen: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1428,7 +1461,7 @@ private fun PermissionRow(title: String, granted: Boolean, onOpen: () -> Unit) {
             )
         }
         TextButton(onClick = onOpen) {
-            Text("Open", color = TextPrimary, fontSize = 13.sp)
+            Text(actionLabel, color = TextPrimary, fontSize = 13.sp)
         }
     }
 }

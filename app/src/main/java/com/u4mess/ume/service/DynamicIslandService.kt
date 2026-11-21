@@ -1,5 +1,6 @@
 package com.u4mess.ume.service
 
+import android.Manifest
 import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
@@ -7,21 +8,26 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.view.animation.DecelerateInterpolator
+import android.widget.Toast
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -34,6 +40,7 @@ import com.u4mess.ume.MainActivity
 import com.u4mess.ume.R
 import com.u4mess.ume.sensors.ScreenReaderAccessibilityService
 import com.u4mess.ume.ui.UmeTheme
+import com.u4mess.ume.voice.VoiceInputManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -54,7 +61,7 @@ class DynamicIslandService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        startForegroundCompat()
         IslandState.running.value = true
 
         if (!Settings.canDrawOverlays(this)) {
@@ -72,10 +79,17 @@ class DynamicIslandService : Service() {
                 UmeTheme {
                     val agentStatus by IslandAgent.status.collectAsState()
                     val approval by IslandAgent.approval.collectAsState()
+                    val listening by VoiceInputManager.isListening.collectAsState()
+                    val partialTranscript by VoiceInputManager.partialTranscript.collectAsState()
+                    val rmsLevel by VoiceInputManager.rmsLevel.collectAsState()
                     DynamicIsland(
                         expanded = expanded.value,
                         agentStatus = agentStatus,
                         approval = approval,
+                        isListening = listening,
+                        partialTranscript = partialTranscript,
+                        rmsLevel = rmsLevel,
+                        onMicClick = { onMicPressed() },
                         onApprove = { IslandAgent.approve() },
                         onCancelApproval = { IslandAgent.cancelApproval() },
                         onExpand = {
@@ -121,6 +135,14 @@ class DynamicIslandService : Service() {
         runCatching { windowManager.addView(islandView, layoutParams) }.onFailure { stopSelf() }
 
         updateTouchRelay()
+        scope.launch {
+            VoiceInputManager.errorMessage.collect { message ->
+                if (message != null) {
+                    Toast.makeText(this@DynamicIslandService, message, Toast.LENGTH_SHORT).show()
+                    VoiceInputManager.clearError()
+                }
+            }
+        }
         scope.launch {
             IslandSettings.yOffsetDp.collect {
                 if (!expanded.value && ::islandView.isInitialized && islandView.isAttachedToWindow) {
@@ -174,6 +196,7 @@ class DynamicIslandService : Service() {
     override fun onDestroy() {
         scope.cancel()
         yAnimator?.cancel()
+        VoiceInputManager.destroy()
         IslandTouchRelay.hide()
         if (::islandView.isInitialized && islandView.isAttachedToWindow) {
             getSystemService(InputMethodManager::class.java)
@@ -188,6 +211,9 @@ class DynamicIslandService : Service() {
 
     private fun setExpanded(value: Boolean) {
         if (expanded.value == value) return
+        if (!value && VoiceInputManager.isListening.value) {
+            VoiceInputManager.cancel()
+        }
         expanded.value = value
 
         layoutParams.flags = if (value) EXPANDED_FLAGS else COLLAPSED_FLAGS
@@ -209,6 +235,71 @@ class DynamicIslandService : Service() {
                     .hideSoftInputFromWindow(islandView.windowToken, 0)
                 islandView.clearFocus()
             }
+        }
+    }
+
+    private fun onMicPressed() {
+        if (VoiceInputManager.isListening.value) {
+            VoiceInputManager.stopListening()
+            return
+        }
+        if (!VoiceInputManager.hasPermission(this)) {
+            Toast.makeText(this, "Grant Microphone in Settings", Toast.LENGTH_SHORT).show()
+            startActivity(
+                Intent(this, MainActivity::class.java)
+                    .putExtra(MainActivity.EXTRA_REQUEST_MIC, true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            return
+        }
+
+        ensureMicrophoneForegroundType()
+        VoiceInputManager.startListening { text ->
+            if (text.isNotBlank()) {
+                PromptInbox.send(text)
+                setExpanded(false)
+            }
+        }
+    }
+
+    private fun startForegroundCompat() {
+        val micGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        val types = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && micGranted ->
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && micGranted ->
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            else -> 0
+        }
+        runCatching {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(), types)
+        }.onFailure { throwable ->
+            Log.e("UmeIsland", "Foreground service type rejected; retrying safe type", throwable)
+            val safe = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            } else {
+                0
+            }
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(), safe)
+        }
+    }
+
+    private fun ensureMicrophoneForegroundType() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val types = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        } else {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
+        runCatching {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(), types)
+        }.onFailure { throwable ->
+            Log.e("UmeIsland", "Could not switch to microphone foreground type", throwable)
         }
     }
 

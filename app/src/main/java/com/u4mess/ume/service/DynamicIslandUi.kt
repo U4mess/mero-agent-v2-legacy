@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.u4mess.ume.ui.MonkeyMood
 import com.u4mess.ume.ui.UmeMonkeyFace
+import com.u4mess.ume.ui.VoiceMicButton
 
 private val IslandBackground = Color(0xFF000000)
 private val IslandBorder = Color(0xFF1F1F1F)
@@ -59,6 +60,10 @@ internal fun DynamicIsland(
     expanded: Boolean,
     agentStatus: AgentStatus?,
     approval: ApprovalRequest?,
+    isListening: Boolean,
+    partialTranscript: String,
+    rmsLevel: Float,
+    onMicClick: () -> Unit,
     onApprove: () -> Unit,
     onCancelApproval: () -> Unit,
     onExpand: () -> Unit,
@@ -114,6 +119,12 @@ internal fun DynamicIsland(
         } else {
             focusManager.clearFocus()
             if (!expanded) prompt = ""
+        }
+    }
+
+    LaunchedEffect(isListening, partialTranscript) {
+        if (isListening && partialTranscript.isNotBlank()) {
+            prompt = partialTranscript
         }
     }
 
@@ -196,7 +207,10 @@ internal fun DynamicIsland(
                 )
             }
         } else if (expanded) {
-            UmeMonkeyFace(Modifier.size(22.dp), mood = MonkeyMood.THINKING)
+            UmeMonkeyFace(
+                Modifier.size(22.dp),
+                mood = if (isListening) MonkeyMood.ACTING else MonkeyMood.THINKING,
+            )
             Spacer(Modifier.width(8.dp))
             BasicTextField(
                 value = prompt,
@@ -218,14 +232,22 @@ internal fun DynamicIsland(
                     }
                 },
             )
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
+            VoiceMicButton(
+                isListening = isListening,
+                rmsLevel = rmsLevel,
+                onClick = onMicClick,
+                tint = IslandText,
+                border = IslandBorder,
+            )
+            Spacer(Modifier.width(6.dp))
             Box(
                 modifier = Modifier
                     .height(30.dp)
                     .clip(RoundedCornerShape(15.dp))
                     .background(IslandText)
                     .clickable(onClick = ::send)
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text("Send", color = IslandBackground, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)

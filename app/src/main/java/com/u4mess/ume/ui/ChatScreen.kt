@@ -1,5 +1,9 @@
 package com.u4mess.ume.ui
 
+import android.Manifest
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -42,6 +47,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
@@ -57,6 +63,7 @@ import com.u4mess.ume.brain.ChatRole
 import com.u4mess.ume.brain.UiAgentResult
 import com.u4mess.ume.service.ApprovalRequest
 import com.u4mess.ume.service.IslandAgent
+import com.u4mess.ume.voice.VoiceInputManager
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -93,12 +100,60 @@ fun ChatScreen() {
     val mode by ChatController.mode.collectAsState()
     val agentStatus by IslandAgent.status.collectAsState()
     val approval by IslandAgent.approval.collectAsState()
+    val listening by VoiceInputManager.isListening.collectAsState()
+    val partialTranscript by VoiceInputManager.partialTranscript.collectAsState()
+    val rmsLevel by VoiceInputManager.rmsLevel.collectAsState()
+    val voiceError by VoiceInputManager.errorMessage.collectAsState()
     val charging = rememberCharging()
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val context = LocalContext.current
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
     val inputFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+
+    val submitVoice: (String) -> Unit = { text ->
+        if (text.isNotBlank()) {
+            ChatController.send(text)
+            input = ""
+        }
+    }
+    val micLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            VoiceInputManager.startListening(submitVoice)
+        } else {
+            Toast.makeText(context, "Microphone permission is required.", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val onMicClick: () -> Unit = {
+        when {
+            VoiceInputManager.isListening.value -> VoiceInputManager.stopListening()
+            !VoiceInputManager.hasPermission(context) ->
+                micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            else -> VoiceInputManager.startListening(submitVoice)
+        }
+    }
+
+    LaunchedEffect(listening, partialTranscript) {
+        if (listening && partialTranscript.isNotBlank()) {
+            input = partialTranscript
+        }
+    }
+
+    LaunchedEffect(voiceError) {
+        voiceError?.let { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            VoiceInputManager.clearError()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (VoiceInputManager.isListening.value) VoiceInputManager.cancel()
+        }
+    }
 
     val mood = when {
         approval != null -> MonkeyMood.ACTING
@@ -177,6 +232,9 @@ fun ChatScreen() {
             generating = generating,
             focusRequester = inputFocus,
             imeVisible = imeVisible,
+            isListening = listening,
+            rmsLevel = rmsLevel,
+            onMicClick = onMicClick,
             onSend = {
                 if (input.isNotBlank()) {
                     ChatController.send(input)
@@ -601,6 +659,9 @@ private fun ChatInput(
     generating: Boolean,
     focusRequester: FocusRequester,
     imeVisible: Boolean,
+    isListening: Boolean,
+    rmsLevel: Float,
+    onMicClick: () -> Unit,
     onSend: () -> Unit,
 ) {
     Row(
@@ -647,7 +708,15 @@ private fun ChatInput(
                     }
                 },
             )
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(6.dp))
+            VoiceMicButton(
+                isListening = isListening,
+                rmsLevel = rmsLevel,
+                onClick = onMicClick,
+                tint = TextPrimary,
+                border = Border,
+            )
+            Spacer(Modifier.width(6.dp))
             Text(
                 text = "Send",
                 color = if (value.isNotBlank() && !generating) Black else TextSecondary,
@@ -657,7 +726,7 @@ private fun ChatInput(
                     .clip(RoundedCornerShape(16.dp))
                     .background(if (value.isNotBlank() && !generating) TextPrimary else Border)
                     .clickable(enabled = value.isNotBlank() && !generating, onClick = onSend)
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }
     }

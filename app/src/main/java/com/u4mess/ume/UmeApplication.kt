@@ -14,6 +14,7 @@ import com.u4mess.ume.memory.NightlyConsolidator
 import com.u4mess.ume.service.IslandSettings
 import com.u4mess.ume.settings.CloudSettings
 import com.u4mess.ume.settings.ThemeSettings
+import com.u4mess.ume.voice.VoiceInputManager
 import io.objectbox.BoxStore
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +39,7 @@ class UmeApplication : Application() {
         CloudSettings.init(this)
         ThemeSettings.init(this)
         IslandSettings.init(this)
+        VoiceInputManager.init(this)
         ChatController.start(this, memoryRepository)
         scheduleNightlyConsolidation()
         autoLoadModels()
