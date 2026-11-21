@@ -108,6 +108,7 @@ import com.u4mess.ume.BuildConfig
 import com.u4mess.ume.UmeApplication
 import com.u4mess.ume.brain.LocalLlmEngine
 import com.u4mess.ume.brain.ModelStatus
+import com.u4mess.ume.memory.MemoryBackupManager
 import com.u4mess.ume.memory.MemoryEntity
 import com.u4mess.ume.memory.MemorySource
 import com.u4mess.ume.memory.NightlyConsolidator
@@ -310,8 +311,50 @@ fun MemoryScreen() {
 fun SettingsScreen() {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
+    val scope = rememberCoroutineScope()
+    val memoryRepository = (context.applicationContext as UmeApplication).memoryRepository
     var refresh by remember { mutableIntStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    val backupExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    MemoryBackupManager.exportToUri(context, memoryRepository, uri)
+                }.onSuccess { count ->
+                    Toast.makeText(
+                        context,
+                        "Exported $count ${if (count == 1) "memory" else "memories"}",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }.onFailure {
+                    Toast.makeText(context, "Export failed", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    val backupImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    MemoryBackupManager.importFromUri(context, memoryRepository, uri)
+                }.onSuccess { (imported, skipped) ->
+                    Toast.makeText(
+                        context,
+                        "Imported $imported new ($skipped skipped)",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }.onFailure {
+                    Toast.makeText(context, "Import failed", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -1108,6 +1151,31 @@ fun SettingsScreen() {
                     Text("Run now", color = TextPrimary, fontSize = 13.sp)
                 }
             }
+            RowDivider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 16.dp, top = 12.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text("Memory backup", color = TextPrimary, fontSize = 15.sp)
+                    Text(
+                        text = "Export or restore on-device memories as JSON",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                BackupActionButton("Export", filled = true) {
+                    backupExportLauncher.launch(
+                        "mero-agent-memories-${LocalDate.now()}.json",
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
+                BackupActionButton("Import", filled = false) {
+                    backupImportLauncher.launch(arrayOf("application/json"))
+                }
+            }
         }
 
         Spacer(Modifier.height(12.dp))
@@ -1814,6 +1882,28 @@ private fun PermissionRow(
             Text(actionLabel, color = TextPrimary, fontSize = 13.sp)
         }
     }
+}
+
+@Composable
+private fun BackupActionButton(
+    label: String,
+    filled: Boolean,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = label,
+        color = if (filled) OnAccent else TextPrimary,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        modifier = Modifier
+            .height(32.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (filled) Accent else Color.Transparent)
+            .border(0.75.dp, if (filled) Accent else Border, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    )
 }
 
 @Composable

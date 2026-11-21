@@ -37,6 +37,9 @@ class MemoryRepository(private val box: Box<MemoryEntity>) {
         return id
     }
 
+    fun all(): List<MemoryEntity> =
+        box.query().build().use { it.find() }
+
     fun recent(limit: Int = 200): List<MemoryEntity> =
         box.query()
             .orderDesc(MemoryEntity_.timestamp)
